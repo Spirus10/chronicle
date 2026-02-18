@@ -1,0 +1,2756 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Character Sheet — DND Tracker</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0a0f;--card:rgba(20,18,15,0.85);--border:#2a2520;
+  --gold:#e8c170;--text:#c8bfa9;--dim:#5a5040;--dim2:#3a3428;
+  --red:#8b2020;--purple:#9860cc;--blue:#50a0dc;--green:#40cc80;--pink:#cc4060;
+}
+body{background:var(--bg);color:var(--text);font-family:'Crimson Text','Garamond','Georgia',serif;min-height:100vh;position:relative;overflow-x:hidden}
+body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellipse at 20% 50%,rgba(40,10,20,0.5) 0%,transparent 60%),radial-gradient(ellipse at 80% 20%,rgba(15,10,35,0.4) 0%,transparent 50%),radial-gradient(ellipse at 50% 80%,rgba(20,5,10,0.3) 0%,transparent 60%);pointer-events:none;z-index:0}
+
+.wrap{max-width:760px;margin:0 auto;padding:0 0 80px;position:relative;z-index:1}
+
+@media (min-width: 1100px) {
+  .wrap{max-width:1200px}
+  .tab-content{padding:16px 24px}
+}
+
+/* ── Header ── */
+.sheet-header{padding:16px 16px 0;background:rgba(10,10,15,0.9);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:50;backdrop-filter:blur(12px)}
+.header-top{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.back-link{color:var(--dim);font-size:12px;letter-spacing:1px;text-decoration:none;flex-shrink:0}
+.back-link:hover{color:var(--gold)}
+.char-name-display{font-size:24px;font-weight:700;letter-spacing:3px;color:var(--gold);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.char-identity{font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--dim);margin-bottom:10px}
+
+/* ── Tab bar ── */
+.tab-bar{display:flex;gap:0;border-bottom:1px solid var(--border)}
+.tab{flex:1;padding:8px 4px;text-align:center;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--dim);cursor:pointer;border-bottom:2px solid transparent;transition:all 0.2s;white-space:nowrap}
+.tab.active{color:var(--gold);border-bottom-color:var(--gold)}
+.tab:hover:not(.active){color:var(--text)}
+
+/* ── Tab content ── */
+.tab-content{padding:12px 16px;display:none}
+.tab-content.active{display:block}
+
+/* ── Cards ── */
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:10px;backdrop-filter:blur(10px)}
+.card-label{font-size:10px;letter-spacing:2.5px;text-transform:uppercase;color:var(--dim);margin-bottom:10px;display:flex;align-items:center;gap:6px}
+
+/* ── Ability scores ── */
+.ability-row{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-bottom:10px}
+.ability-box{background:#1a1510;border:1px solid var(--border);border-radius:6px;padding:8px 4px;text-align:center;cursor:pointer;position:relative}
+.ability-box:hover{border-color:rgba(232,193,112,0.3)}
+.ability-score{font-size:20px;font-weight:700;color:var(--gold);line-height:1}
+.ability-mod{font-size:13px;color:var(--text);margin-top:2px}
+.ability-label{font-size:8px;letter-spacing:1.5px;text-transform:uppercase;color:var(--dim);margin-top:3px}
+
+/* ── Core stats row ── */
+.core-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px}
+.core-stat{background:#1a1510;border:1px solid var(--border);border-radius:6px;padding:8px 4px;text-align:center}
+.core-stat-val{font-size:18px;font-weight:700;color:var(--gold)}
+.core-stat-lbl{font-size:8px;letter-spacing:1.5px;text-transform:uppercase;color:var(--dim);margin-top:3px}
+.stat-editable{cursor:pointer}
+.stat-editable:hover .core-stat-val{color:#f0d090}
+
+/* ── Saves & Skills ── */
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+.save-list,.skill-list-panel{list-style:none}
+.save-item,.skill-item{display:flex;align-items:center;gap:6px;padding:3px 0;font-size:12px;border-bottom:1px solid rgba(42,37,32,0.4)}
+.save-item:last-child,.skill-item:last-child{border-bottom:none}
+.prof-dot{width:10px;height:10px;border-radius:50%;border:1px solid var(--dim2);flex-shrink:0}
+.prof-dot.prof{background:rgba(232,193,112,0.4);border-color:rgba(232,193,112,0.6)}
+.prof-dot.exp{background:rgba(64,204,128,0.4);border-color:rgba(64,204,128,0.6)}
+.save-name,.skill-name-cell{flex:1;color:var(--text)}
+.save-ability{font-size:9px;color:var(--dim);letter-spacing:1px}
+.save-val,.skill-val{font-size:12px;font-weight:600;color:var(--gold);min-width:26px;text-align:right}
+
+/* ── HP ── */
+.hp-bar{width:100%;height:28px;background:#1a1510;border-radius:4px;overflow:hidden;position:relative;border:1px solid var(--border)}
+.hp-fill{height:100%;position:absolute;left:0;top:0;transition:width 0.4s ease,background 0.4s ease;border-radius:3px}
+.hp-temp-fill{height:100%;position:absolute;top:0;transition:all 0.4s ease;border-radius:3px}
+.hp-text{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:13px;font-weight:600;color:var(--gold);text-shadow:0 1px 3px rgba(0,0,0,0.8);white-space:nowrap;cursor:pointer}
+.hp-controls{display:flex;gap:6px;margin-top:8px;align-items:center}
+.hp-input{flex:1;background:#1a1510;border:1px solid var(--border);border-radius:4px;color:var(--text);padding:6px 10px;font-size:14px;font-family:inherit;outline:none;text-align:center}
+.quick-btns{display:flex;gap:4px;margin-top:6px;flex-wrap:wrap}
+.hp-quick-split{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.hp-quick-col{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.hp-quick-col .btn{width:100%;padding:6px 0}
+
+/* ── Buttons ── */
+.btn{padding:6px 12px;border-radius:4px;font-size:12px;font-family:inherit;cursor:pointer;transition:all 0.2s;white-space:nowrap;letter-spacing:0.5px;border:1px solid}
+.btn-gold{background:rgba(232,193,112,0.1);border-color:rgba(232,193,112,0.27);color:var(--gold)}
+.btn-gold:hover{background:rgba(232,193,112,0.18)}
+.btn-blue{background:rgba(80,160,220,0.1);border-color:rgba(80,160,220,0.27);color:var(--blue)}
+.btn-red{background:rgba(139,32,32,0.1);border-color:rgba(139,32,32,0.27);color:var(--red)}
+.btn-green{background:rgba(64,204,128,0.1);border-color:rgba(64,204,128,0.27);color:var(--green)}
+.btn-brown{background:rgba(139,64,32,0.1);border-color:rgba(139,64,32,0.27);color:#8b4020}
+.btn-dim{background:transparent;border-color:var(--border);color:var(--dim);opacity:0.4;cursor:default}
+.btn-sm{padding:3px 8px;font-size:10px}
+
+.action-btn{position:relative;overflow:visible}
+.action-btn[data-tip]:hover::after{
+  content:attr(data-tip);
+  position:absolute;
+  left:50%;
+  bottom:calc(100% + 10px);
+  transform:translateX(-50%);
+  width:max-content;
+  max-width:280px;
+  white-space:normal;
+  padding:8px 10px;
+  border-radius:8px;
+  font-size:11px;
+  line-height:1.35;
+  letter-spacing:0.2px;
+  color:#dfd6c2;
+  background:rgba(28,24,19,0.96);
+  border:1px solid rgba(138,127,109,0.45);
+  box-shadow:0 8px 24px rgba(0,0,0,0.45);
+  z-index:300;
+  pointer-events:none;
+}
+.action-btn[data-tip]:hover::before{
+  content:'';
+  position:absolute;
+  left:50%;
+  bottom:calc(100% + 4px);
+  transform:translateX(-50%);
+  border:6px solid transparent;
+  border-top-color:rgba(28,24,19,0.96);
+  z-index:300;
+  pointer-events:none;
+}
+
+/* ── Slots ── */
+.slot-dot{width:20px;height:20px;border-radius:50%;cursor:pointer;transition:all 0.2s;border:2px solid}
+.slot-dot.full{border-color:var(--gold);background:rgba(232,193,112,0.2);box-shadow:0 0 8px rgba(232,193,112,0.15)}
+.slot-dot.empty{border-color:var(--dim2);background:transparent}
+.slot-row{display:flex;align-items:center;justify-content:space-between;padding:4px 0}
+.slot-row-label{font-size:10px;letter-spacing:1px;color:var(--dim)}
+.slot-dots{display:flex;gap:5px;flex-wrap:wrap}
+
+/* ── Effects / Conditions ── */
+.tag{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:12px;font-size:10px;letter-spacing:1px;text-transform:uppercase;cursor:pointer;transition:all 0.2s;user-select:none;border:1px solid}
+.effects-wrap{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+
+/* ── Concentration ── */
+.conc-banner{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:rgba(180,140,60,0.08);border:1px solid rgba(180,140,60,0.2);border-radius:6px;margin-bottom:8px}
+.conc-banner span{font-size:12px;color:#b48c3c;letter-spacing:1px}
+
+/* ── Wide button ── */
+.wide-btn{padding:10px 14px;border-radius:6px;font-size:12px;font-family:inherit;cursor:pointer;transition:all 0.2s;text-align:left;width:100%;display:flex;align-items:center;gap:8px;letter-spacing:0.5px;border:1px solid var(--dim2);background:transparent;color:#8a7f6d}
+.wide-btn:hover{border-color:rgba(232,193,112,0.2)}
+.wide-btn.active{border-color:var(--purple);color:var(--purple);background:rgba(152,96,204,0.1)}
+.wide-btn.active-blue{border-color:var(--blue);color:var(--blue);background:rgba(80,160,220,0.1)}
+.wide-btn.active-gold{border-color:var(--gold);color:var(--gold);background:rgba(232,193,112,0.08)}
+.wide-btn.dim{opacity:0.3;cursor:default}
+.wide-btn .w-title{font-weight:600}
+.wide-btn .w-sub{font-size:10px;opacity:0.7}
+
+/* ── Prompt ── */
+.prompt{display:flex;align-items:center;gap:6px;padding:8px 12px;border-radius:6px;margin-top:6px}
+.prompt input{width:70px;background:#1a1510;border-radius:4px;color:var(--text);padding:4px 8px;font-size:13px;font-family:inherit;outline:none;text-align:center;border:1px solid var(--border)}
+.prompt label{font-size:11px;white-space:nowrap}
+
+/* ── Round badge ── */
+.round-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;background:rgba(232,193,112,0.08);border:1px solid var(--border);border-radius:12px;font-size:11px;color:var(--gold)}
+
+/* ── Log ── */
+.log-entry{padding:4px 0;border-bottom:1px solid #1a1815;font-size:12px;color:#7a6f5d;line-height:1.4}
+
+/* ── Spell card ── */
+.spell-card{background:#0f0d0a;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;overflow:hidden}
+.spell-card-header{display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;transition:background 0.15s}
+.spell-card-header:hover{background:rgba(255,255,255,0.02)}
+.spell-card-name{font-size:13px;font-weight:600;flex:1}
+.spell-card-meta{font-size:10px;color:var(--dim);text-align:right;white-space:nowrap}
+.spell-card-body{padding:10px 12px;border-top:1px solid var(--dim2);display:none;font-size:12px;line-height:1.7;color:var(--text)}
+.spell-card-body.open{display:block}
+.spell-level-divider{font-size:9px;letter-spacing:2.5px;text-transform:uppercase;color:var(--dim2);padding:8px 0 4px;margin-top:4px}
+.conc-badge{display:inline-flex;padding:1px 6px;border-radius:8px;font-size:9px;background:rgba(180,140,60,0.15);border:1px solid rgba(180,140,60,0.3);color:#b48c3c;margin-left:4px}
+.ritual-badge{display:inline-flex;padding:1px 6px;border-radius:8px;font-size:9px;background:rgba(80,160,220,0.1);border:1px solid rgba(80,160,220,0.25);color:var(--blue);margin-left:4px}
+.cast-btn{padding:2px 8px;border-radius:3px;font-size:10px;font-family:inherit;cursor:pointer;border:1px solid rgba(232,193,112,0.3);background:rgba(232,193,112,0.07);color:var(--gold);transition:all 0.2s}
+.cast-btn:hover{background:rgba(232,193,112,0.15)}
+.cast-btn:disabled{opacity:0.3;cursor:default}
+.prepared-dot{width:10px;height:10px;border-radius:50%;border:1px solid;flex-shrink:0;cursor:pointer}
+
+/* ── Features ── */
+.feature-card{background:#0f0d0a;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;overflow:hidden}
+.feature-header{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;cursor:pointer}
+.feature-header:hover{background:rgba(255,255,255,0.02)}
+.feature-name{font-size:13px;font-weight:600;color:var(--text)}
+.feature-level{font-size:10px;color:var(--dim);letter-spacing:1px}
+.feature-body{padding:10px 12px;border-top:1px solid var(--dim2);display:none;font-size:12px;line-height:1.7;color:var(--text)}
+.feature-body.open{display:block}
+.feature-section-label{font-size:9px;letter-spacing:2.5px;text-transform:uppercase;color:var(--dim2);margin:14px 0 6px}
+
+/* Entry rendering */
+.entry-title{font-size:12px;font-weight:700;color:var(--gold);margin:8px 0 4px}
+.entry-list{padding-left:16px;margin:4px 0}
+.entry-list li{margin-bottom:3px}
+.entry-table{width:100%;border-collapse:collapse;font-size:11px;margin:6px 0}
+.entry-table th{text-align:left;padding:4px 6px;border-bottom:1px solid var(--border);color:var(--gold);font-size:10px;letter-spacing:1px}
+.entry-table td{padding:3px 6px;border-bottom:1px solid #1a1510}
+.entry-inset{border-left:2px solid var(--dim2);padding:6px 10px;margin:6px 0;font-style:italic}
+.tag-condition{color:#cc8080}
+.tag-skill{color:var(--blue)}
+
+/* ── Inventory ── */
+.inv-table{width:100%;border-collapse:collapse;font-size:12px}
+.inv-table th{text-align:left;padding:4px 8px;font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--dim);border-bottom:1px solid var(--border)}
+.inv-table td{padding:5px 8px;border-bottom:1px solid #1a1510;vertical-align:middle}
+.inv-table tr:hover td{background:rgba(255,255,255,0.02)}
+.inv-name{font-weight:600}
+.inv-type{display:inline-flex;padding:1px 6px;border-radius:8px;font-size:9px;text-transform:uppercase;letter-spacing:0.5px}
+.equipped-dot{width:8px;height:8px;border-radius:50%;display:inline-block;cursor:pointer}
+.equipped-dot.on{background:var(--green)}
+.equipped-dot.off{background:var(--dim2)}
+.currency-row{display:flex;gap:10px;align-items:center}
+.currency-coin{text-align:center;flex:1}
+.currency-coin label{font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--dim);display:block;margin-bottom:4px}
+.currency-coin input{width:100%;background:#1a1510;border:1px solid var(--border);border-radius:4px;color:var(--text);padding:5px;font-size:14px;font-family:inherit;outline:none;text-align:center}
+
+/* ── Death saves ── */
+.death-saves{display:flex;gap:12px;align-items:center}
+.ds-group{display:flex;gap:4px;align-items:center}
+.ds-dot{width:16px;height:16px;border-radius:50%;border:1px solid;cursor:pointer;transition:all 0.2s;flex-shrink:0}
+.ds-dot.success.filled{background:rgba(64,204,128,0.5);border-color:var(--green)}
+.ds-dot.success:not(.filled){border-color:rgba(64,204,128,0.3)}
+.ds-dot.failure.filled{background:rgba(139,32,32,0.5);border-color:var(--red)}
+.ds-dot.failure:not(.filled){border-color:rgba(139,32,32,0.3)}
+
+/* ── Misc ── */
+.rest-row{display:flex;gap:8px;margin-bottom:8px}
+.rest-row .wide-btn{justify-content:center}
+.below-half{font-size:10px;color:#cc4040;margin-top:4px;letter-spacing:1px}
+.dmg-ref{font-size:12px;line-height:1.8;color:#8a7f6d}
+.dmg-ref strong{color:var(--gold)}
+.hidden{display:none !important}
+.loading-tab{text-align:center;padding:40px;color:var(--dim);font-size:13px}
+
+/* Notes textareas */
+.notes-field{margin-bottom:12px}
+.notes-field label{display:block;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--dim);margin-bottom:5px}
+.notes-field textarea{width:100%;background:#1a1510;border:1px solid var(--border);border-radius:4px;color:var(--text);padding:8px 10px;font-size:13px;font-family:inherit;outline:none;resize:vertical;line-height:1.6;min-height:80px}
+.notes-field textarea:focus{border-color:rgba(232,193,112,0.3)}
+
+/* Item modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;display:flex;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(4px)}
+.modal{background:#0f0d0a;border:1px solid var(--border);border-radius:10px;padding:20px;max-width:420px;width:100%}
+.modal h3{font-size:15px;font-weight:700;color:var(--gold);letter-spacing:2px;margin-bottom:14px}
+.modal-field{margin-bottom:10px}
+.modal-field label{display:block;font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--dim);margin-bottom:4px}
+.modal-field input,.modal-field select,.modal-field textarea{width:100%;background:#1a1510;border:1px solid var(--border);border-radius:4px;color:var(--text);padding:7px 10px;font-size:13px;font-family:inherit;outline:none}
+.modal-field textarea{resize:vertical;min-height:60px}
+.modal-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<!-- Sticky header -->
+<div class="sheet-header">
+  <div class="header-top">
+    <a href="/" class="back-link">← Roster</a>
+    <div class="char-name-display" id="charNameDisplay">Loading...</div>
+    <button class="btn btn-blue btn-sm" id="editBtn" onclick="openEditForActiveTab()">Edit</button>
+    <button class="btn btn-gold btn-sm" id="saveBtn" onclick="manualSave()">Save</button>
+  </div>
+  <div class="char-identity" id="charIdentity"></div>
+  <div class="tab-bar">
+    <div class="tab active" onclick="switchTab('overview')">Overview</div>
+    <div class="tab" onclick="switchTab('tracker')">Tracker</div>
+    <div class="tab" onclick="switchTab('spells')">Spells</div>
+    <div class="tab" onclick="switchTab('features')">Features</div>
+    <div class="tab" onclick="switchTab('inventory')">Inventory</div>
+    <div class="tab" onclick="switchTab('notes')">Notes</div>
+  </div>
+</div>
+
+<!-- Tab: Overview -->
+<div class="tab-content active" id="tab-overview">
+  <div id="overviewContent"><div class="loading-tab">Loading character...</div></div>
+</div>
+
+<!-- Tab: Spells -->
+<div class="tab-content" id="tab-spells">
+  <div id="spellsContent"><div class="loading-tab">Loading spells...</div></div>
+</div>
+
+<!-- Tab: Tracker -->
+<div class="tab-content" id="tab-tracker">
+  <div id="trackerContent"><div class="loading-tab">Loading tracker...</div></div>
+</div>
+
+<!-- Tab: Features -->
+<div class="tab-content" id="tab-features">
+  <div id="featuresContent"><div class="loading-tab">Loading features...</div></div>
+</div>
+
+<!-- Tab: Inventory -->
+<div class="tab-content" id="tab-inventory">
+  <div id="inventoryContent"><div class="loading-tab">Loading inventory...</div></div>
+</div>
+
+<!-- Tab: Notes -->
+<div class="tab-content" id="tab-notes">
+  <div id="notesContent"></div>
+</div>
+
+<!-- Item modal -->
+<div class="modal-overlay hidden" id="itemModal">
+  <div class="modal">
+    <h3 id="itemModalTitle">Add Item</h3>
+    <div class="modal-field">
+      <label>Name</label>
+      <input type="text" id="itemName" placeholder="e.g. Longsword +1">
+    </div>
+    <div class="modal-row">
+      <div class="modal-field">
+        <label>Type</label>
+        <select id="itemType">
+          <option>misc</option>
+          <option>weapon</option>
+          <option>armor</option>
+          <option>consumable</option>
+          <option>tool</option>
+          <option>treasure</option>
+          <option>magic</option>
+        </select>
+      </div>
+      <div class="modal-field">
+        <label>Quantity</label>
+        <input type="number" id="itemQty" min="1" value="1">
+      </div>
+    </div>
+    <div class="modal-row">
+      <div class="modal-field">
+        <label>Weight (lbs)</label>
+        <input type="number" id="itemWeight" min="0" step="0.5" placeholder="Optional">
+      </div>
+      <div class="modal-field">
+        <label>Value (GP)</label>
+        <input type="number" id="itemValue" min="0" step="0.01" placeholder="Optional">
+      </div>
+    </div>
+    <div class="modal-field">
+      <label>Notes (damage, magic effects, etc.)</label>
+      <textarea id="itemNotes" placeholder="e.g. 1d8+3 slashing, +1 to attack rolls, requires attunement..."></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-dim" onclick="closeItemModal()">Cancel</button>
+      <button class="btn btn-gold" onclick="saveItem()">Add Item</button>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<script src="/js/shared.js"></script>
+<script>
+// ── State ─────────────────────────────────────────────────────────
+const charId = new URLSearchParams(location.search).get('id');
+let char = null, state = null, progression = null, classFeatures = [], subFeatures = [];
+let allSpells = [], spellsById = {};
+let spellDetailsById = {};
+let spellDetailsByName = {};
+let inventory = [], currency = { cp:0, sp:0, ep:0, gp:0, pp:0 };
+let activeTab = 'overview';
+let editingItemId = null;
+let optionalFeatureSelections = {};
+let optionalFeatureEditorOpen = {};
+let optionalFeaturesById = {};
+let collapseState = {};
+let featureChoiceSelections = {};
+let allOptionalFeatures = [];
+let optionalFeaturesByRef = {};
+
+const ACTION_TOOLTIP_SPELLS = ['Mage Armor', 'Eldritch Blast'];
+
+function tabStorageKey() {
+  return `dnd.sheet.activeTab.${charId || 'unknown'}`;
+}
+
+function collapseStorageKey() {
+  return `dnd.sheet.collapse.${charId || 'unknown'}`;
+}
+
+function loadCollapseState() {
+  try {
+    const raw = localStorage.getItem(collapseStorageKey());
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveCollapseState() {
+  try {
+    localStorage.setItem(collapseStorageKey(), JSON.stringify(collapseState));
+  } catch (e) {}
+}
+
+function isCardOpen(key) {
+  return !!collapseState[key];
+}
+
+function setCardOpen(key, open) {
+  collapseState[key] = !!open;
+  saveCollapseState();
+}
+
+function toggleCardById(key, id) {
+  const el = document.getElementById(id);
+  if (!el) return false;
+  const open = !el.classList.contains('open');
+  el.classList.toggle('open', open);
+  setCardOpen(key, open);
+  return open;
+}
+
+function loadSavedTab() {
+  try {
+    const t = localStorage.getItem(tabStorageKey());
+    const allowed = new Set(['overview','tracker','spells','features','inventory','notes']);
+    return allowed.has(t) ? t : 'overview';
+  } catch (e) {
+    return 'overview';
+  }
+}
+
+function saveActiveTab(tab) {
+  try {
+    localStorage.setItem(tabStorageKey(), tab);
+  } catch (e) {}
+}
+
+const CONDITIONS = [
+  {k:'blinded',n:'Blinded',d:"Can't see; attacks vs you have advantage, your attacks disadvantage."},
+  {k:'charmed',n:'Charmed',d:'Can\'t attack charmer; charmer has advantage on social checks vs you.'},
+  {k:'deafened',n:'Deafened',d:"Can't hear; auto-fail hearing checks."},
+  {k:'frightened',n:'Frightened',d:'Disadvantage on checks/attacks while source is in sight.'},
+  {k:'grappled',n:'Grappled',d:'Speed 0; ends if grappler is incapacitated.'},
+  {k:'incapacitated',n:'Incapacitated',d:"Can't take actions or reactions."},
+  {k:'invisible',n:'Invisible',d:'Attacks vs you disadvantage, your attacks advantage.'},
+  {k:'paralyzed',n:'Paralyzed',d:'Incapacitated, can\'t move/speak; hits within 5ft are crits.'},
+  {k:'petrified',n:'Petrified',d:'Incapacitated, unaware; resist all damage.'},
+  {k:'poisoned',n:'Poisoned',d:'Disadvantage on attack rolls and ability checks.'},
+  {k:'prone',n:'Prone',d:'Attacks vs you advantage within 5ft, otherwise disadvantage.'},
+  {k:'restrained',n:'Restrained',d:'Speed 0; attacks vs you advantage; DEX saves disadvantage.'},
+  {k:'stunned',n:'Stunned',d:"Incapacitated, can't move; attacks vs you advantage."},
+  {k:'unconscious',n:'Unconscious',d:"Incapacitated, unaware; hits within 5ft are crits."},
+  {k:'exhaustion',n:'Exhaustion',d:'Stacking debuff — 1:Disadv on checks, 3:Disadv on attacks/saves, 5:Speed halved/halved again, 6:Death.'},
+];
+
+// ── Init ──────────────────────────────────────────────────────────
+async function init() {
+  if (!charId) { location.href = '/'; return; }
+  try {
+    [char, state, inventory, currency] = await Promise.all([
+      API.get(`/characters/${charId}`),
+      API.get(`/characters/${charId}/state`),
+      API.get(`/characters/${charId}/inventory`),
+      API.get(`/characters/${charId}/currency`),
+    ]);
+
+    // Load class data
+    if (char.class_id) {
+      [progression, classFeatures] = await Promise.all([
+        API.get(`/classes/${char.class_id}/progression`),
+        API.get(`/classes/${char.class_id}/features?level=${char.level}`),
+      ]);
+    }
+    if (char.subclass_id && char.class_id) {
+      subFeatures = await API.get(`/classes/${char.class_id}/subclasses/${char.subclass_id}/features?level=${char.level}`);
+    }
+
+    optionalFeatureSelections = char.stat_overrides?.optional_feature_selections || {};
+    featureChoiceSelections = char.stat_overrides?.feature_choice_selections || {};
+    collapseState = loadCollapseState();
+    condPanelOpen = collapseState.cond_panel !== false;
+    if (char.class_name) {
+      allOptionalFeatures = await API.get('/optional-features').catch(() => []);
+      optionalFeaturesByRef = {};
+      optionalFeaturesById = {};
+      for (const f of allOptionalFeatures) {
+        optionalFeaturesById[f.id] = f;
+        const key = `${(f.name || '').toLowerCase()}|${(f.source || '').toLowerCase()}`;
+        optionalFeaturesByRef[key] = f;
+        const nameOnly = (f.name || '').toLowerCase();
+        if (!optionalFeaturesByRef[nameOnly]) optionalFeaturesByRef[nameOnly] = f;
+      }
+      const classOptTypes = extractOptionalFeatureTypes([...(classFeatures || []), ...(subFeatures || [])]);
+      if (classOptTypes.length) {
+        const groups = await Promise.all(classOptTypes.map(t =>
+          API.get(`/optional-features?featureType=${encodeURIComponent(t)}&class=${encodeURIComponent((char.class_name || '').toLowerCase())}&level=${char.level}`).catch(() => [])
+        ));
+        groups.flat().forEach(f => { optionalFeaturesById[f.id] = f; });
+      }
+    }
+
+    syncResourceEffects();
+
+    // Load selected spells by ID so chosen spells always render
+    if (char.spellcasting_type) {
+      const knownIds = [...new Set([...(char.spells_known||[]), ...(char.spellbook||[])])];
+      if (knownIds.length) {
+        const loaded = await Promise.all(
+          knownIds.map(id => API.get(`/spells/${id}`).catch(() => null))
+        );
+        allSpells = loaded.filter(Boolean);
+        for (const s of allSpells) {
+          indexSpellDetail(s);
+        }
+      }
+    }
+
+    await ensureActionTooltipSpellsLoaded();
+
+    // Update header
+    document.getElementById('charNameDisplay').textContent = char.name.toUpperCase();
+    document.title = `${char.name} — DND Tracker`;
+    const identity = [char.race_name, char.class_name, char.subclass_name ? `(${char.subclass_name})` : null, `Level ${char.level}`].filter(Boolean).join(' · ');
+    document.getElementById('charIdentity').textContent = identity + (char.background_name ? ` · ${char.background_name}` : '') + (char.alignment ? ` · ${char.alignment}` : '');
+
+    renderOverview();
+    renderNotes();
+    switchTab(loadSavedTab());
+
+  } catch (err) {
+    document.getElementById('overviewContent').innerHTML = `<div class="loading-tab" style="color:#cc4040">Failed to load: ${err.message}</div>`;
+    console.error(err);
+  }
+}
+
+// ── Tab switching ─────────────────────────────────────────────────
+function switchTab(tab) {
+  activeTab = tab;
+  saveActiveTab(tab);
+  document.querySelectorAll('.tab').forEach((t,i) => {
+    const names = ['overview','tracker','spells','features','inventory','notes'];
+    t.classList.toggle('active', names[i] === tab);
+  });
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  document.getElementById(`tab-${tab}`).classList.add('active');
+
+  if (tab === 'tracker' && document.getElementById('trackerContent').children[0]?.classList.contains('loading-tab')) renderTracker();
+  if (tab === 'spells' && document.getElementById('spellsContent').children[0]?.classList.contains('loading-tab')) renderSpells();
+  if (tab === 'features' && document.getElementById('featuresContent').children[0]?.classList.contains('loading-tab')) renderFeatures();
+  if (tab === 'inventory') renderInventory();
+}
+
+function openEditForActiveTab() {
+  const stepByTab = {
+    overview: 3,
+    tracker: 5,
+    spells: 4,
+    features: 2,
+    inventory: 5,
+    notes: 1,
+  };
+  const stepTarget = stepByTab[activeTab] || 1;
+  location.href = `/builder.html?edit=${charId}&step=${stepTarget}`;
+}
+
+// ── Derived stats ─────────────────────────────────────────────────
+function getStats() {
+  const stats = calcStats({
+    level: char.level,
+    ability_scores: char.ability_scores,
+    stat_overrides: char.stat_overrides,
+    skill_proficiencies: char.skill_proficiencies,
+    spellcasting_ability: char.spellcasting_ability,
+    class_save_proficiencies: char.class_save_proficiencies || [],
+    race_speed: char.race_speed || { walk: 30 },
+  });
+  if (state?.class_resources?.mage_armor_active) {
+    stats.ac = Math.max(stats.ac, 13 + stats.mods.dex);
+  }
+  if (hasSelectedFeatureName('Defense')) {
+    stats.ac += 1;
+  }
+  return stats;
+}
+
+function selectedOptionalFeatureIds() {
+  const fromOptions = Object.values(optionalFeatureSelections || {}).flat();
+  const fromChoices = Object.values(featureChoiceSelections || {}).flat();
+  return [...new Set([...fromOptions, ...fromChoices].filter(Boolean).map(v => parseInt(v, 10)).filter(n => Number.isInteger(n)))];
+}
+
+function selectedOptionalFeaturesResolved() {
+  const ids = selectedOptionalFeatureIds();
+  return ids.map(id => optionalFeaturesById[id]).filter(Boolean);
+}
+
+function selectedFeatureNamesLower() {
+  return selectedOptionalFeaturesResolved().map(f => (f.name || '').toLowerCase());
+}
+
+function hasSelectedFeatureName(name) {
+  const n = (name || '').toLowerCase();
+  return selectedFeatureNamesLower().includes(n);
+}
+
+// ── Save debounce ─────────────────────────────────────────────────
+const debouncedSaveState = debounce(pushState, 600);
+
+async function pushState() {
+  try {
+    await API.put(`/characters/${charId}/state`, {
+      hp_current: state.hp_current,
+      hp_temp: state.hp_temp,
+      hp_temp_source: state.hp_temp_source,
+      spell_slots_used: state.spell_slots_used,
+      hit_dice_used: state.hit_dice_used,
+      prepared_spells: state.prepared_spells,
+      concentration: state.concentration,
+      active_effects: state.active_effects,
+      conditions: state.conditions,
+      class_resources: state.class_resources,
+      combat_active: state.combat_active,
+      combat_round: state.combat_round,
+      death_saves: state.death_saves,
+      log: state.log,
+    });
+  } catch(e) { console.warn('State save failed:', e.message); }
+}
+
+async function manualSave() {
+  const btn = document.getElementById('saveBtn');
+  btn.textContent = '...';
+  try {
+    await pushState();
+    await API.put(`/characters/${charId}`, {
+      ability_scores: char.ability_scores,
+      stat_overrides: char.stat_overrides,
+      level: char.level,
+    });
+    btn.textContent = 'Saved!';
+    btn.style.color = '#40cc80';
+  } catch(e) { btn.textContent = 'Error'; btn.style.color = '#cc4040'; }
+  setTimeout(() => { btn.textContent = 'Save'; btn.style.color = ''; }, 1500);
+}
+
+// ── LOG ───────────────────────────────────────────────────────────
+function addLog(msg) {
+  state.log = state.log || [];
+  state.log.unshift({ m: msg, t: Date.now() });
+  if (state.log.length > 60) state.log.length = 60;
+  const box = document.getElementById('logBox');
+  if (box) renderLogBox(box);
+  debouncedSaveState();
+}
+
+function renderLogBox(box) {
+  if (!state.log?.length) { box.innerHTML = '<div style="font-size:11px;color:#3a3428;font-style:italic">No actions yet...</div>'; return; }
+  box.innerHTML = state.log.map((e,i) =>
+    `<div class="log-entry" style="opacity:${i===0?1:Math.max(0.25,1-i*0.07)}">${e.m}</div>`
+  ).join('');
+}
+
+// ── OVERVIEW TAB ──────────────────────────────────────────────────
+function renderOverview() {
+  const stats = getStats();
+  const lvlProg = progression?.find(r => r.level === char.level);
+  const hitDie = char.hit_die || 8;
+  const hp = state.hp_current;
+  const hpMax = char.stat_overrides?.hp_max || (progression ? null : null) || state.hp_current; // fallback
+  const hpMaxVal = char.stat_overrides?.hp_max || state.hp_current + Math.max(0, state.hp_temp);
+  const tmp = state.hp_temp || 0;
+  const pct = Math.min(100, (hp / Math.max(1, hpMaxVal)) * 100);
+  const bHalf = hp <= Math.floor(hpMaxVal / 2);
+
+  const slotHtml = renderSlotSection(lvlProg);
+
+  document.getElementById('overviewContent').innerHTML = `
+    <!-- Ability Scores -->
+    <div class="card">
+      <div class="card-label">Ability Scores</div>
+      <div class="ability-row" id="abilityRow"></div>
+      <div class="core-stats">
+        <div class="core-stat stat-editable" onclick="editStat('ac')" title="Click to override">
+          <div class="core-stat-val" id="acVal">${stats.ac}</div>
+          <div class="core-stat-lbl">AC</div>
+        </div>
+        <div class="core-stat stat-editable" onclick="editStat('initiative')" title="Click to override">
+          <div class="core-stat-val" id="initVal">${modStr(stats.initiative)}</div>
+          <div class="core-stat-lbl">Initiative</div>
+        </div>
+        <div class="core-stat">
+          <div class="core-stat-val">${stats.speed}ft</div>
+          <div class="core-stat-lbl">Speed</div>
+        </div>
+        <div class="core-stat">
+          <div class="core-stat-val">+${stats.pb}</div>
+          <div class="core-stat-lbl">Prof Bonus</div>
+        </div>
+        ${char.spellcasting_ability ? `
+          <div class="core-stat stat-editable" onclick="editStat('spell_dc')" title="Click to override">
+            <div class="core-stat-val" id="dcVal">${stats.spellDC}</div>
+            <div class="core-stat-lbl">Spell DC</div>
+          </div>
+          <div class="core-stat stat-editable" onclick="editStat('spell_atk')" title="Click to override">
+            <div class="core-stat-val" id="saVal">${modStr(stats.spellAtk)}</div>
+            <div class="core-stat-lbl">Spell Atk</div>
+          </div>
+        ` : ''}
+        <div class="core-stat">
+          <div class="core-stat-val">${stats.passivePerception}</div>
+          <div class="core-stat-lbl">Passive Perc</div>
+        </div>
+        ${char.race_darkvision ? `<div class="core-stat"><div class="core-stat-val">${char.race_darkvision}ft</div><div class="core-stat-lbl">Darkvision</div></div>` : ''}
+      </div>
+    </div>
+
+    <!-- Saves & Skills -->
+    <div class="two-col">
+      <div class="card" style="margin-bottom:0">
+        <div class="card-label">Saving Throws</div>
+        <ul class="save-list" id="saveList"></ul>
+      </div>
+      <div class="card" style="margin-bottom:0">
+        <div class="card-label">Skills</div>
+        <ul class="skill-list-panel" id="skillList"></ul>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-label">Proficiencies</div>
+      <div style="font-size:12px;line-height:1.8;color:var(--text)">
+        <div><strong style="color:var(--dim)">Languages:</strong> ${(char.stat_overrides?.languages || []).map(v => String(v).replace(/\b\w/g, c => c.toUpperCase())).join(', ') || '—'}</div>
+        <div><strong style="color:var(--dim)">Tools:</strong> ${(char.stat_overrides?.tools || []).map(v => String(v).replace(/\b\w/g, c => c.toUpperCase())).join(', ') || '—'}</div>
+      </div>
+    </div>
+    <div style="margin-bottom:10px"></div>
+
+  `;
+
+  renderAbilityBoxes();
+  renderSavesList();
+  renderSkillsList();
+}
+
+function renderTracker() {
+  const container = document.getElementById('trackerContent');
+  if (!container) return;
+  syncResourceEffects();
+  const stats = getStats();
+  const lvlProg = progression?.find(r => r.level === char.level);
+  const hp = state.hp_current;
+  const hpMaxVal = char.stat_overrides?.hp_max || state.hp_current + Math.max(0, state.hp_temp);
+  const bHalf = hp <= Math.floor(hpMaxVal / 2);
+  const slotHtml = renderSlotSection(lvlProg);
+  const trackerStatsHtml = renderTrackerCombatStats(stats);
+
+  container.innerHTML = `
+    <div class="card">
+      <div class="card-label">Combat Snapshot</div>
+      <div class="core-stats">${trackerStatsHtml}</div>
+    </div>
+
+    <!-- Combat section -->
+    <div id="combatSection"></div>
+
+    <!-- HP -->
+    <div class="card">
+      <div class="card-label">❤ Hit Points</div>
+      <div class="hp-bar" id="hpBar">
+        <div class="hp-fill" id="hpFill"></div>
+        <div class="hp-temp-fill" id="hpTmpFill"></div>
+        <div class="hp-text" id="hpText" onclick="promptSetMaxHP()" title="Click to set max HP"></div>
+      </div>
+      <div id="belowHalf" class="${bHalf ? 'below-half' : 'below-half hidden'}">⚠ BELOW HALF HP</div>
+      <div class="hp-quick-split">
+        <div class="hp-quick-col">
+          <button class="btn btn-red btn-sm" onclick="applyDmg(1)">-1</button>
+          <button class="btn btn-red btn-sm" onclick="applyDmg(5)">-5</button>
+          <button class="btn btn-red btn-sm" onclick="applyDmg(10)">-10</button>
+          <button class="btn btn-red btn-sm" onclick="applyDmg(25)">-25</button>
+          <button class="btn btn-red btn-sm" onclick="applyDmg(50)">-50</button>
+          <button class="btn btn-red btn-sm" onclick="applyDmg(100)">-100</button>
+        </div>
+        <div class="hp-quick-col">
+          <button class="btn btn-green btn-sm" onclick="applyHeal(1)">+1</button>
+          <button class="btn btn-green btn-sm" onclick="applyHeal(5)">+5</button>
+          <button class="btn btn-green btn-sm" onclick="applyHeal(10)">+10</button>
+          <button class="btn btn-green btn-sm" onclick="applyHeal(25)">+25</button>
+          <button class="btn btn-green btn-sm" onclick="applyHeal(50)">+50</button>
+          <button class="btn btn-green btn-sm" onclick="applyHeal(100)">+100</button>
+        </div>
+      </div>
+      <div id="tempHpSection" style="margin-top:8px"></div>
+      ${state.hp_current <= 0 ? `
+        <div style="margin-top:10px;padding:8px;border:1px solid rgba(139,32,32,0.3);border-radius:6px;background:rgba(139,32,32,0.05)">
+          <div class="card-label" style="margin-bottom:6px">💀 Death Saves</div>
+          <div class="death-saves">
+            <div class="ds-group">
+              <span style="font-size:10px;color:var(--green);margin-right:2px">✓</span>
+              ${[0,1,2].map(i=>`<div class="ds-dot success ${i < (state.death_saves?.successes||0) ? 'filled' : ''}" onclick="toggleDS('success',${i})"></div>`).join('')}
+            </div>
+            <div class="ds-group">
+              <span style="font-size:10px;color:var(--red);margin-right:2px">✕</span>
+              ${[0,1,2].map(i=>`<div class="ds-dot failure ${i < (state.death_saves?.failures||0) ? 'filled' : ''}" onclick="toggleDS('failure',${i})"></div>`).join('')}
+            </div>
+            <button class="btn btn-green btn-sm" onclick="stabilize()">Stable</button>
+          </div>
+        </div>
+      ` : ''}
+    </div>
+
+    <!-- Spell Slots & Hit Dice -->
+    ${slotHtml}
+
+    <!-- Concentration -->
+    <div id="concBanner" class="${state.concentration ? 'conc-banner' : 'hidden'}">
+      <span>👁 Concentrating: <strong>${state.concentration || ''}</strong></span>
+      <button class="btn btn-brown btn-sm" onclick="dropConc()">Drop</button>
+    </div>
+
+    <!-- Active Effects -->
+    <div class="card">
+      <div class="card-label">Active Effects <span style="font-size:9px;color:#3a3428;font-style:italic;letter-spacing:0.5px">tap to dismiss</span></div>
+      <div class="effects-wrap" id="effectTags"></div>
+    </div>
+
+    <!-- Conditions -->
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div class="card-label" style="margin-bottom:0">Conditions <span style="font-size:9px;color:#3a3428;font-style:italic">tap to toggle</span></div>
+        <button class="btn btn-sm btn-dim" id="condToggleBtn" onclick="toggleCondPanel()" style="padding:2px 8px">Hide</button>
+      </div>
+      <div id="condBody" style="margin-top:8px">
+        <div class="effects-wrap" id="condTags"></div>
+        <div id="condInfo" style="margin-top:6px;font-size:11px;color:#8a7f6d"></div>
+      </div>
+    </div>
+
+    <!-- Class actions panel -->
+    <div class="card" id="actionsPanel">
+      <div class="card-label">⚡ Actions & Class Abilities</div>
+      <div id="actionsGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:6px"></div>
+    </div>
+
+    <!-- Damage Reference -->
+    <div class="card" id="dmgRefCard" style="display:none">
+      <div class="card-label">Damage Reference</div>
+      <div class="dmg-ref" id="dmgRef"></div>
+    </div>
+
+    <!-- Rests -->
+    <div class="rest-row">
+      <button class="wide-btn" style="justify-content:center" onclick="doShortRest()">☽ Short Rest</button>
+      <button class="wide-btn" style="justify-content:center" onclick="doLongRest()">🌙 Long Rest</button>
+    </div>
+
+    <!-- Log -->
+    <div class="card" style="max-height:200px;overflow:hidden">
+      <div class="card-label">Combat Log</div>
+      <div id="logBox" style="max-height:160px;overflow-y:auto"></div>
+    </div>
+  `;
+
+  renderHPBar();
+  renderCombatSection();
+  renderEffects();
+  renderConditions();
+  if (!condPanelOpen) {
+    const body = document.getElementById('condBody');
+    const btn = document.getElementById('condToggleBtn');
+    if (body) body.style.display = 'none';
+    if (btn) btn.textContent = 'Show';
+  }
+  renderActions();
+  renderLogBox(document.getElementById('logBox'));
+}
+
+function renderTrackerCombatStats(stats) {
+  const cls = (char.class_name || '').toLowerCase();
+  const names = selectedFeatureNamesLower();
+  const items = [
+    { label: 'AC', value: stats.ac },
+    { label: 'Initiative', value: modStr(stats.initiative) },
+    { label: 'Speed', value: `${stats.speed}ft` },
+    { label: 'Prof Bonus', value: `+${stats.pb}` },
+    { label: 'Passive Perc', value: stats.passivePerception },
+  ];
+
+  if (char.spellcasting_ability) {
+    items.push({ label: 'Spell DC', value: stats.spellDC });
+    items.push({ label: 'Spell Atk', value: modStr(stats.spellAtk) });
+  }
+
+  if (cls === 'monk') {
+    const kiDc = 8 + stats.pb + (stats.mods.wis || 0);
+    items.push({ label: 'Ki Save DC', value: kiDc });
+  }
+  if (cls === 'barbarian') {
+    const rageDmg = char.level >= 16 ? 4 : char.level >= 9 ? 3 : 2;
+    items.push({ label: 'Rage Dmg', value: `+${rageDmg}` });
+  }
+  if (cls === 'rogue') {
+    const sneak = Math.ceil(char.level / 2);
+    items.push({ label: 'Sneak Atk', value: `${sneak}d6` });
+  }
+  if (cls === 'warlock') {
+    const bm = char.level >= 17 ? 4 : char.level >= 11 ? 3 : char.level >= 5 ? 2 : 1;
+    items.push({ label: 'E.Blast Beams', value: bm });
+  }
+
+  if (names.includes('archery')) items.push({ label: 'Ranged Atk', value: '+2' });
+  if (names.includes('dueling')) items.push({ label: '1H Weapon Dmg', value: '+2' });
+  if (names.includes('blind fighting')) items.push({ label: 'Blindsight', value: '10ft' });
+
+  const notes = [];
+  if (names.includes('great weapon fighting')) notes.push('GWF: reroll weapon damage 1-2 (once)');
+  if (names.includes('protection')) notes.push('Protection reaction available');
+  if (names.includes('interception')) notes.push('Interception reaction available');
+
+  let html = items.map(it => `
+    <div class="core-stat">
+      <div class="core-stat-val">${it.value}</div>
+      <div class="core-stat-lbl">${it.label}</div>
+    </div>
+  `).join('');
+
+  if (notes.length) {
+    html += `<div class="core-stat" style="grid-column:1/-1"><div class="core-stat-val" style="font-size:12px;color:var(--text)">${notes.join(' · ')}</div><div class="core-stat-lbl">Combat Notes</div></div>`;
+  }
+
+  return html;
+}
+
+function escapeAttr(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function firstEntryText(entries) {
+  if (!entries) return '';
+  if (typeof entries === 'string') return entries;
+  if (Array.isArray(entries)) {
+    for (const e of entries) {
+      const t = firstEntryText(e);
+      if (t) return t;
+    }
+    return '';
+  }
+  if (typeof entries === 'object') {
+    return firstEntryText(entries.entries || entries.entry || entries.items || '');
+  }
+  return '';
+}
+
+function getSpellTooltip(spell) {
+  const detail = spellDetailsById[spell.id] || spell;
+  let text = toPlainEntryText(detail?.data?.entries || detail?.entries || '');
+  const hl = detail?.data?.entriesHigherLevel || detail?.entriesHigherLevel;
+  const hlText = toPlainEntryText(hl || '');
+  if (hlText) text = `${text} At Higher Levels: ${hlText}`.trim();
+  if (!text) return `${spell.name}: cast this spell.`;
+  return `${spell.name}: ${text}`;
+}
+
+function indexSpellDetail(spell) {
+  if (!spell) return;
+  if (spell.id !== undefined && spell.id !== null) {
+    spellsById[spell.id] = spell;
+    spellDetailsById[spell.id] = spell;
+  }
+  if (spell.name) {
+    spellDetailsByName[String(spell.name).toLowerCase()] = spell;
+  }
+}
+
+async function ensureActionTooltipSpellsLoaded() {
+  for (const name of ACTION_TOOLTIP_SPELLS) {
+    if (spellDetailsByName[name.toLowerCase()]) continue;
+    try {
+      const results = await API.get(`/spells?search=${encodeURIComponent(name)}&level=0-9`);
+      const exact = (results || []).find(s => String(s.name || '').toLowerCase() === name.toLowerCase()) || results?.[0];
+      if (!exact) continue;
+      const detail = await API.get(`/spells/${exact.id}`).catch(() => exact);
+      indexSpellDetail(detail);
+    } catch (e) {}
+  }
+}
+
+function toPlainEntryText(entries) {
+  if (!entries) return '';
+  const html = renderEntries(Array.isArray(entries) ? entries : [entries]);
+  return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function getTooltipFromFeatureNames(names) {
+  const wanted = new Set((names || []).map(n => String(n).toLowerCase()));
+  const pool = [
+    ...(classFeatures || []),
+    ...(subFeatures || []),
+    ...(selectedOptionalFeaturesResolved() || []),
+  ];
+  const hit = pool.find(f => wanted.has(String(f.name || '').toLowerCase()));
+  if (!hit) return '';
+  const text = toPlainEntryText(hit.entries || hit.data?.entries || []);
+  return text || '';
+}
+
+function getTooltipFromSpellName(name) {
+  const target = String(name || '').toLowerCase();
+  const spell = spellDetailsByName[target]
+    || Object.values(spellDetailsById || {}).find(s => String(s.name || '').toLowerCase() === target)
+    || (allSpells || []).find(s => String(s.name || '').toLowerCase() === target);
+  if (!spell) return '';
+  return getSpellTooltip(spell);
+}
+
+function getActionTooltip(key, fallbackLabel = '') {
+  const map = {
+    eldritch_blast: { spell: 'Eldritch Blast' },
+    vampiric_bite: { features: ['Vampiric Bite'] },
+    form_of_dread: { features: ['Form of Dread'] },
+    mage_armor: { optional: ['Armor of Shadows'], spell: 'Mage Armor' },
+    rage: { features: ['Rage'] },
+    reckless_attack: { features: ['Reckless Attack'] },
+    second_wind: { features: ['Second Wind'] },
+    action_surge: { features: ['Action Surge'] },
+    indomitable: { features: ['Indomitable'] },
+    ki: { features: ['Ki'] },
+    flurry_of_blows: { features: ['Ki'] },
+    step_of_wind: { features: ['Ki'] },
+    patient_defense: { features: ['Ki'] },
+    sneak_attack: { features: ['Sneak Attack'] },
+    cunning_action: { features: ['Cunning Action'] },
+    sorcery_points: { features: ['Font of Magic'] },
+    metamagic: { features: ['Metamagic'] },
+    lay_on_hands: { features: ['Lay on Hands'] },
+    divine_smite: { features: ['Divine Smite'] },
+    bardic_inspiration: { features: ['Bardic Inspiration'] },
+    wild_shape: { features: ['Wild Shape'] },
+    channel_divinity: { features: ['Channel Divinity'] },
+    protection: { optional: ['Protection'] },
+    interception: { optional: ['Interception'] },
+  };
+  const spec = map[key] || {};
+  if (spec.spell) {
+    const t = getTooltipFromSpellName(spec.spell);
+    if (t) return t;
+  }
+  const names = [...(spec.features || []), ...(spec.optional || [])];
+  const fromFeatures = getTooltipFromFeatureNames(names);
+  if (fromFeatures) return fromFeatures;
+  return fallbackLabel;
+}
+
+function renderAbilityBoxes() {
+  const row = document.getElementById('abilityRow');
+  if (!row) return;
+  const scores = char.ability_scores;
+  row.innerHTML = Object.entries(scores).map(([ab, val]) => {
+    const mod = abilityMod(val);
+    return `
+      <div class="ability-box" onclick="editAbility('${ab}')" title="Click to edit">
+        <div class="ability-score">${val}</div>
+        <div class="ability-mod">${modStr(mod)}</div>
+        <div class="ability-label">${ABILITY_NAMES[ab]}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderSavesList() {
+  const list = document.getElementById('saveList');
+  if (!list) return;
+  const stats = getStats();
+  list.innerHTML = Object.entries(stats.saves).map(([ab, val]) => {
+    const isProf = (char.class_save_proficiencies || []).includes(ab);
+    return `
+      <li class="save-item">
+        <div class="prof-dot ${isProf ? 'prof' : ''}"></div>
+        <span class="save-name">${ABILITY_FULL[ab]}</span>
+        <span class="save-val">${modStr(val)}</span>
+      </li>
+    `;
+  }).join('');
+}
+
+function renderSkillsList() {
+  const list = document.getElementById('skillList');
+  if (!list) return;
+  const stats = getStats();
+  list.innerHTML = SKILLS.map(sk => {
+    const prof = char.skill_proficiencies?.[sk.key];
+    const val = stats.skills[sk.key];
+    const dotClass = prof === 'expertise' ? 'exp' : prof === 'proficient' ? 'prof' : '';
+    return `
+      <li class="skill-item">
+        <div class="prof-dot ${dotClass}"></div>
+        <span class="skill-name-cell">${sk.name}</span>
+        <span class="skill-ability">${sk.ability.toUpperCase()}</span>
+        <span class="skill-val">${modStr(val)}</span>
+      </li>
+    `;
+  }).join('');
+}
+
+function renderHPBar() {
+  const fill = document.getElementById('hpFill');
+  const tmpFill = document.getElementById('hpTmpFill');
+  const text = document.getElementById('hpText');
+  const bh = document.getElementById('belowHalf');
+  if (!fill) return;
+
+  const hp = state.hp_current;
+  const tmp = state.hp_temp || 0;
+  const hpMax = char.stat_overrides?.hp_max || hp + tmp; // best guess
+  const pct = Math.min(100, (hp / Math.max(1, hpMax)) * 100);
+  const bHalf = hp <= Math.floor(hpMax / 2);
+
+  fill.style.width = pct + '%';
+  fill.style.background = pct > 50 ? 'linear-gradient(90deg,#4a1a1a,#8b2020)' : pct > 25 ? 'linear-gradient(90deg,#4a3a1a,#8b6b20)' : 'linear-gradient(90deg,#4a1a2a,#8b2040)';
+
+  const barTotal = hpMax + tmp;
+  const hpBarPct = (hp / barTotal) * 100;
+  const tmpPct = (tmp / barTotal) * 100;
+  if (tmp > 0) {
+    tmpFill.style.display = 'block';
+    tmpFill.style.left = Math.min(100, hpBarPct) + '%';
+    tmpFill.style.width = Math.min(100 - hpBarPct, tmpPct) + '%';
+    const src = state.hp_temp_source;
+    tmpFill.style.background = src === 'agathys' ? 'linear-gradient(90deg,rgba(80,160,220,0.5),rgba(80,160,220,0.7))' : 'linear-gradient(90deg,rgba(152,96,204,0.5),rgba(152,96,204,0.7))';
+  } else {
+    tmpFill.style.display = 'none';
+  }
+
+  const tc = state.hp_temp_source === 'agathys' ? '#50a0dc' : '#9860cc';
+  text.innerHTML = `${hp} / ${hpMax}${tmp > 0 ? ` <span style="color:${tc}">+${tmp}</span>` : ''}`;
+  if (bh) { bh.className = bHalf ? 'below-half' : 'below-half hidden'; }
+}
+
+function renderSlotSection(prog) {
+  if (!prog || !char.spellcasting_type) {
+    // Hit dice only
+    return renderHitDiceCard();
+  }
+  const isPact = char.caster_progression === 'pact';
+  const slots = prog.spell_slots || [];
+  const used = state.spell_slots_used || {};
+
+  let html = `<div class="card"><div class="card-label">⚡ Spell Slots</div>`;
+  if (isPact) {
+    const pactIdx = slots.findIndex(n => n > 0);
+    if (pactIdx >= 0) {
+      const total = slots[pactIdx];
+      const usedCount = used[pactIdx] || 0;
+      html += `<div class="slot-row"><div class="slot-row-label">Spell Slots ${total - usedCount}/${total} Level ${pactIdx + 1}</div><div class="slot-dots">`;
+      for (let i = 0; i < total; i++) {
+        html += `<div class="slot-dot ${i < usedCount ? 'empty' : 'full'}" onclick="toggleSlot(${pactIdx},${i},${total})"></div>`;
+      }
+      html += `</div></div>`;
+    }
+  } else {
+    for (let lvl = 0; lvl < 9; lvl++) {
+      const total = slots[lvl] || 0;
+      if (!total) continue;
+      const usedCount = used[lvl] || 0;
+      html += `<div class="slot-row"><div class="slot-row-label">${ordinal(lvl+1)} Level</div><div class="slot-dots">`;
+      for (let i = 0; i < total; i++) {
+        html += `<div class="slot-dot ${i < usedCount ? 'empty' : 'full'}" onclick="toggleSlot(${lvl},${i},${total})"></div>`;
+      }
+      html += `</div></div>`;
+    }
+  }
+  html += `</div>`;
+  html += renderHitDiceCard();
+  return html;
+}
+
+function renderHitDiceCard() {
+  const total = char.level;
+  const used = state.hit_dice_used || [];
+  const usedCount = Array.isArray(used) ? used.filter(Boolean).length : 0;
+  return `
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div class="card-label" style="margin-bottom:0">Hit Dice (d${char.hit_die || 8}) ${total - usedCount}/${total}</div>
+        <div class="slot-dots">
+          ${Array.from({length: Math.min(total, 20)}, (_,i) =>
+            `<div class="slot-dot ${(Array.isArray(used) ? used[i] : i < usedCount) ? 'empty' : 'full'}" onclick="toggleHitDie(${i})"></div>`
+          ).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderCombatSection() {
+  const cs = document.getElementById('combatSection');
+  if (!cs) return;
+  if (state.combat_active) {
+    cs.innerHTML = `<div class="card" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div class="round-badge">⚡ Round ${state.combat_round}</div><div style="display:flex;gap:6px"><button class="btn btn-gold btn-sm" onclick="nextRound()">Next Round</button><button class="btn btn-dim btn-sm" onclick="endCombat()">End</button></div></div>`;
+  } else {
+    cs.innerHTML = `<div style="text-align:center;margin-bottom:10px"><button class="btn btn-gold" onclick="startCombat()">⚔ Start Combat</button></div>`;
+  }
+}
+
+function renderEffects() {
+  const wrap = document.getElementById('effectTags');
+  if (!wrap) return;
+  const effects = state.active_effects || [];
+  let html = '';
+  if (effects.length === 0) {
+    html = '<span style="font-size:11px;color:var(--dim2);font-style:italic">None active</span>';
+  } else {
+    html = effects.map((e,i) =>
+      `<span class="tag" style="background:${e.color || '#9860cc'}18;border-color:${e.color || '#9860cc'}44;color:${e.color || '#9860cc'};cursor:${e.locked ? 'default' : 'pointer'}" ${e.locked ? '' : `onclick="dismissEffect(${i})"`}>${e.locked ? '●' : '✕'} ${e.name}${e.duration_rounds > 0 ? ` (${e.duration_rounds}r)` : ''}</span>`
+    ).join('');
+  }
+  wrap.innerHTML = html;
+}
+
+function renderConditions() {
+  const tags = document.getElementById('condTags');
+  const info = document.getElementById('condInfo');
+  if (!tags) return;
+  const conds = state.conditions || {};
+  tags.innerHTML = CONDITIONS.map(c => {
+    const on = !!conds[c.k];
+    return `<span class="tag" style="background:${on?'rgba(204,64,64,0.12)':'transparent'};border-color:${on?'rgba(204,64,64,0.35)':'rgba(42,37,32,0.27)'};color:${on?'#cc5050':'#8a7f6d'}" onclick="toggleCondition('${c.k}')">${on?'●':'○'} ${c.n}</span>`;
+  }).join('');
+  const active = CONDITIONS.filter(c => conds[c.k]);
+  if (info) info.innerHTML = active.map(c => `<div><strong style="color:#cc8080">${c.n}:</strong> ${c.d}</div>`).join('');
+}
+
+let condPanelOpen = true;
+function toggleCondPanel() {
+  condPanelOpen = !condPanelOpen;
+  document.getElementById('condBody').style.display = condPanelOpen ? 'block' : 'none';
+  document.getElementById('condToggleBtn').textContent = condPanelOpen ? 'Hide' : 'Show';
+  setCardOpen('cond_panel', condPanelOpen);
+}
+
+// ── Actions panel (class-specific) ───────────────────────────────
+function renderActions() {
+  const grid = document.getElementById('actionsGrid');
+  const dmgCard = document.getElementById('dmgRefCard');
+  if (!grid) return;
+
+  const res = state.class_resources || {};
+  const cls = (char.class_name || '').toLowerCase();
+  const stats = getStats();
+  const lvlProg = progression?.find(r => r.level === char.level);
+
+  let buttons = [];
+
+  // ── Warlock ──────────────────────────────────────────────────
+  if (cls === 'warlock') {
+    // Eldritch Blast
+    const bm = char.level >= 17 ? 4 : char.level >= 11 ? 3 : char.level >= 5 ? 2 : 1;
+    const chaMod = abilityMod(char.ability_scores?.cha || 10);
+    buttons.push(spellBtn('⚡ Eldritch Blast', '#50a0dc', false, false, `useEB(${bm},${chaMod})`, getActionTooltip('eldritch_blast', 'Eldritch Blast')));
+
+    // Vampiric Bite (Dhampir / Undead flavor)
+    if (char.race_name?.toLowerCase().includes('dhampir') || char.subclass_name?.toLowerCase().includes('undead')) {
+      buttons.push(spellBtn('🦇 Vampiric Bite', '#cc4040', false, res.bite_used, 'useBite()', getActionTooltip('vampiric_bite', 'Vampiric Bite')));
+    }
+
+    // Form of Dread (Undead patron)
+    if (char.subclass_name?.toLowerCase().includes('undead')) {
+      const fuMax = char.level >= 15 ? 4 : char.level >= 10 ? 3 : 2;
+      const fuUsed = res.form_uses || 0;
+      const formActive = !!res.form_active;
+      buttons.push(spellBtn(`💀 Form of Dread (${fuMax - fuUsed}/${fuMax})`, '#9860cc', formActive, !formActive && fuUsed >= fuMax, 'activateForm()', getActionTooltip('form_of_dread', 'Form of Dread')));
+    }
+
+    if (hasSelectedFeatureName('Armor of Shadows')) {
+      const mageArmorActive = !!res.mage_armor_active;
+      buttons.push(spellBtn('🛡 Mage Armor', '#50a0dc', mageArmorActive, false, 'toggleMageArmor()', getActionTooltip('mage_armor', 'Mage Armor')));
+    }
+  }
+
+  // ── Barbarian ─────────────────────────────────────────────────
+  if (cls === 'barbarian') {
+    const rageMax = char.level >= 20 ? 999 : char.level >= 17 ? 6 : char.level >= 13 ? 5 : char.level >= 9 ? 4 : char.level >= 6 ? 3 : 2;
+    const ragesUsed = res.rages_used || 0;
+    const raging = !!res.raging;
+    buttons.push(spellBtn(`⚔ Rage (${rageMax - ragesUsed}/${rageMax})`, '#cc4040', raging, !raging && ragesUsed >= rageMax, 'toggleRage()', getActionTooltip('rage', 'Rage')));
+    if (char.level >= 2) buttons.push(spellBtn('🛡 Reckless Attack', '#cc6040', !!res.reckless, false, 'toggleReckless()', getActionTooltip('reckless_attack', 'Reckless Attack')));
+  }
+
+  // ── Fighter ───────────────────────────────────────────────────
+  if (cls === 'fighter') {
+    buttons.push(spellBtn('🔄 Second Wind', '#40cc80', false, !!res.second_wind_used, 'useSecondWind()', getActionTooltip('second_wind', 'Second Wind')));
+    if (char.level >= 2) {
+      const asMax = char.level >= 17 ? 3 : char.level >= 2 ? 1 : 0;
+      const asUsed = res.action_surge_used || 0;
+      buttons.push(spellBtn(`⚡ Action Surge (${asMax - asUsed}/${asMax})`, '#e8c170', false, asUsed >= asMax, 'useActionSurge()', getActionTooltip('action_surge', 'Action Surge')));
+    }
+    if (char.level >= 9) buttons.push(spellBtn('🔁 Indomitable', '#6080cc', false, !!res.indomitable_used, 'useIndomitable()', getActionTooltip('indomitable', 'Indomitable')));
+  }
+
+  // ── Monk ──────────────────────────────────────────────────────
+  if (cls === 'monk') {
+    const kiMax = char.level;
+    const kiUsed = res.ki_used || 0;
+    buttons.push(spellBtn(`✨ Ki (${kiMax - kiUsed}/${kiMax})`, '#e8c170', false, kiUsed >= kiMax, 'useKi(1)', getActionTooltip('ki', 'Ki')));
+    buttons.push(spellBtn('👊 Flurry of Blows', '#cc6040', false, (res.ki_used||0)+2 > kiMax, 'useKi(2)', getActionTooltip('flurry_of_blows', 'Flurry of Blows')));
+    if (char.level >= 2) buttons.push(spellBtn('🏃 Step of Wind', '#50a0dc', false, (res.ki_used||0)+1 > kiMax, 'useKi(1)', getActionTooltip('step_of_wind', 'Step of the Wind')));
+    if (char.level >= 2) buttons.push(spellBtn('🛡 Patient Defense', '#9860cc', false, (res.ki_used||0)+1 > kiMax, 'useKi(1)', getActionTooltip('patient_defense', 'Patient Defense')));
+  }
+
+  // ── Rogue ─────────────────────────────────────────────────────
+  if (cls === 'rogue') {
+    const sneak = Math.ceil(char.level / 2);
+    buttons.push(spellBtn(`🗡 Sneak Attack (${sneak}d6)`, '#cc9040', false, false, `addLog('Sneak Attack: ${sneak}d6 extra damage')`, getActionTooltip('sneak_attack', 'Sneak Attack')));
+    if (char.level >= 2) buttons.push(spellBtn('🌪 Cunning Action', '#50a0dc', false, false, `addLog('Cunning Action: Dash, Disengage, or Hide as bonus action')`, getActionTooltip('cunning_action', 'Cunning Action')));
+  }
+
+  // ── Sorcerer ──────────────────────────────────────────────────
+  if (cls === 'sorcerer') {
+    const spMax = char.level;
+    const spUsed = res.sorcery_points_used || 0;
+    buttons.push(spellBtn(`✨ Sorcery Points (${spMax - spUsed}/${spMax})`, '#cc60cc', false, spUsed >= spMax, 'useSorceryPoint(1)', getActionTooltip('sorcery_points', 'Sorcery Points')));
+    buttons.push(spellBtn('🔄 Metamagic', '#cc60cc', false, false, `addLog('Metamagic applied')`, getActionTooltip('metamagic', 'Metamagic')));
+  }
+
+  // ── Paladin ───────────────────────────────────────────────────
+  if (cls === 'paladin') {
+    const lohPool = res.lay_on_hands_pool ?? char.level * 5;
+    buttons.push(spellBtn(`🙏 Lay on Hands (${lohPool} HP)`, '#40cc80', false, lohPool <= 0, 'useLayOnHands()', getActionTooltip('lay_on_hands', 'Lay on Hands')));
+    if (char.level >= 2) buttons.push(spellBtn('⚔ Divine Smite', '#e8c170', false, false, `addLog('Divine Smite: expend a spell slot for 2d8 radiant + 1d8 per slot level above 1st')`, getActionTooltip('divine_smite', 'Divine Smite')));
+  }
+
+  // ── Bard ──────────────────────────────────────────────────────
+  if (cls === 'bard') {
+    const biDie = char.level >= 15 ? 'd12' : char.level >= 10 ? 'd10' : char.level >= 5 ? 'd8' : 'd6';
+    const biMax = char.spellcasting_ability ? abilityMod(char.ability_scores?.cha || 10) : 1;
+    const biUsed = res.bardic_inspiration_used || 0;
+    const biRemain = Math.max(0, biMax - biUsed);
+    buttons.push(spellBtn(`🎵 Bardic Inspiration (${biRemain}/${biMax} ${biDie})`, '#cc9040', false, biRemain <= 0, 'useBardicInspiration()', getActionTooltip('bardic_inspiration', 'Bardic Inspiration')));
+  }
+
+  // ── Druid ─────────────────────────────────────────────────────
+  if (cls === 'druid') {
+    const wcMax = char.level >= 18 ? 999 : char.level >= 6 ? 2 : char.level >= 2 ? 1 : 0;
+    const wcUsed = res.wild_shape_used || 0;
+    if (wcMax > 0) buttons.push(spellBtn(`🐺 Wild Shape (${wcMax - wcUsed}/${wcMax})`, '#40cc80', !!res.wild_shaped, wcUsed >= wcMax, 'toggleWildShape()', getActionTooltip('wild_shape', 'Wild Shape')));
+  }
+
+  // ── Cleric ────────────────────────────────────────────────────
+  if (cls === 'cleric') {
+    if (char.level >= 2) {
+      const cdUsed = res.channel_divinity_used || 0;
+      const cdMax = char.level >= 18 ? 3 : char.level >= 6 ? 2 : 1;
+      buttons.push(spellBtn(`✝ Channel Divinity (${cdMax - cdUsed}/${cdMax})`, '#e8c170', false, cdUsed >= cdMax, 'useChannelDivinity()', getActionTooltip('channel_divinity', 'Channel Divinity')));
+    }
+  }
+
+  // ── Generic spellcaster quick-actions ────────────────────────
+  if (hasSelectedFeatureName('Protection')) {
+    buttons.push(spellBtn('🛡 Protection (Reaction)', '#6080cc', false, false, `addLog('Protection: impose disadvantage on attack vs ally within 5 ft')`, getActionTooltip('protection', 'Protection')));
+  }
+  if (hasSelectedFeatureName('Interception')) {
+    buttons.push(spellBtn('🛡 Interception (Reaction)', '#6080cc', false, false, `addLog('Interception: reduce damage by 1d10 + PB')`, getActionTooltip('interception', 'Interception')));
+  }
+
+  // ── Generic spellcaster quick-actions ────────────────────────
+  const knownSpells = (char.spells_known || []).concat(char.spellbook || []);
+  if (knownSpells.length && char.spellcasting_type) {
+    const quickSpells = allSpells
+      .filter(s => knownSpells.includes(s.id) && s.level > 0)
+      .sort((a, b) => (a.level - b.level) || a.name.localeCompare(b.name));
+    for (const sp of quickSpells) {
+      const noSlots = checkNoSlots(sp.level);
+      const isConc = sp.concentration;
+      const isAgathys = (sp.name || '').toLowerCase() === 'armor of agathys';
+      const isActive = state.concentration === sp.name || (isAgathys && state.hp_temp_source === 'agathys' && (state.hp_temp || 0) > 0);
+      buttons.push(spellBtn(`${isConc ? '👁 ' : ''}${sp.name}`, isConc ? '#b48c3c' : '#6080cc', isActive, noSlots && !isActive, `quickCast(${sp.id})`, getSpellTooltip(sp)));
+    }
+  }
+
+  grid.innerHTML = buttons.join('');
+
+  // Damage reference for Warlock
+  if (cls === 'warlock' && dmgCard) {
+    dmgCard.style.display = 'block';
+    const bm = char.level >= 17 ? 4 : char.level >= 11 ? 3 : char.level >= 5 ? 2 : 1;
+    const chaMod = abilityMod(char.ability_scores?.cha || 10);
+    let dr = `<div><strong>Eldritch Blast</strong>: ${bm}×(1d10+${chaMod}) = avg ${((5.5 + chaMod) * bm).toFixed(1)}</div>`;
+    if (char.level >= 5) dr += `<div><strong>Repelling Blast</strong>: ${bm * 10}ft push</div>`;
+    document.getElementById('dmgRef').innerHTML = dr;
+  }
+}
+
+function spellBtn(label, color, active, dim, onclick, tooltip = '') {
+  const bg = active ? `${color}18` : 'transparent';
+  const bc = dim ? '#2a2520' : active ? color : '#3a3428';
+  const tc = dim ? '#3a3428' : active ? color : '#8a7f6d';
+  const tip = escapeAttr(tooltip || label);
+  return `<button class="action-btn" data-tip="${tip}" style="padding:10px 12px;border-radius:6px;font-size:11px;font-family:inherit;cursor:${dim?'default':'pointer'};text-align:left;width:100%;display:flex;align-items:center;gap:6px;border:1px solid ${bc};background:${bg};color:${tc};opacity:${dim?0.35:1};transition:all 0.2s" ${dim?'':'onclick="'+onclick+'"'}>${label}</button>`;
+}
+
+function checkNoSlots(spellLevel) {
+  if (!char.spellcasting_type) return true;
+  const prog = progression?.find(r => r.level === char.level);
+  if (!prog?.spell_slots) return true;
+  const used = state.spell_slots_used || {};
+  if (char.caster_progression === 'pact') {
+    const pactIdx = prog.spell_slots.findIndex(n => n > 0);
+    if (pactIdx < 0) return true;
+    return (used[pactIdx] || 0) >= prog.spell_slots[pactIdx];
+  }
+  // For regular slots, find the lowest level slot >= spellLevel
+  for (let l = Math.max(0, spellLevel - 1); l < 9; l++) {
+    const total = prog.spell_slots[l] || 0;
+    if (total > (used[l] || 0)) return false;
+  }
+  return true;
+}
+
+function isTrackableSpellEffect(spell) {
+  const dt = String(spell?.duration_text || '').toLowerCase();
+  if (!dt) return false;
+  return !dt.includes('instant');
+}
+
+function durationToRounds(durationText) {
+  const t = String(durationText || '').toLowerCase();
+  const m = t.match(/(\d+)\s*round/);
+  if (!m) return 0;
+  return parseInt(m[1], 10) || 0;
+}
+
+// ── HP actions ───────────────────────────────────────────────────
+function applyDmg(amt) {
+  if (amt <= 0) return;
+  let rem = amt, tL = 0, hL = 0, retl = false;
+  if (state.hp_temp > 0) {
+    tL = Math.min(state.hp_temp, rem);
+    rem -= tL;
+    if (state.hp_temp_source === 'agathys') {
+      retl = true;
+    }
+    state.hp_temp -= tL;
+    if (state.hp_temp === 0) {
+      if (state.hp_temp_source === 'agathys') {
+        setEffectActive('Armor of Agathys', false, '#50a0dc', 0);
+      }
+      state.hp_temp_source = null;
+    }
+  }
+  if (rem > 0) { hL = rem; state.hp_current = Math.max(0, state.hp_current - rem); }
+  const necroticHuskTriggered = tryTriggerNecroticHusk();
+  let msg = `Took ${amt} damage`;
+  if (tL > 0) msg += ` (${tL} to temp HP)`;
+  if (hL > 0) msg += ` (${hL} to HP)`;
+  if (retl) msg += ` ❄ Agathys retaliates!`;
+  addLog(msg);
+  if (necroticHuskTriggered) {
+    const rests = state.class_resources?.necrotic_husk_recover_rests || 0;
+    addLog(`☠ Necrotic Husk triggered: reduced to 1 HP. Recovery in ${rests} long rest${rests === 1 ? '' : 's'}.`);
+  }
+  updateHPDisplay();
+}
+
+function hasNecroticHuskFeature() {
+  const cls = (char.class_name || '').toLowerCase();
+  const sub = (char.subclass_name || '').toLowerCase();
+  return cls === 'warlock' && sub.includes('undead') && char.level >= 10;
+}
+
+function tryTriggerNecroticHusk() {
+  if (state.hp_current > 0) return false;
+  if (!hasNecroticHuskFeature()) return false;
+  const res = state.class_resources || {};
+  if (res.necrotic_husk_spent) return false;
+  const rests = Math.floor(Math.random() * 4) + 1;
+  res.necrotic_husk_spent = true;
+  res.necrotic_husk_recover_rests = rests;
+  state.class_resources = res;
+  state.hp_current = 1;
+  return true;
+}
+
+function applyHeal(amt) {
+  if (amt <= 0) return;
+  const hpMax = char.stat_overrides?.hp_max || state.hp_current;
+  const h = Math.min(amt, hpMax - state.hp_current);
+  state.hp_current = Math.min(hpMax, state.hp_current + h);
+  addLog(`Healed ${h} HP`);
+  updateHPDisplay();
+}
+
+function doHP() {
+  const v = parseInt(document.getElementById('hpDelta').value);
+  if (isNaN(v) || v === 0) return;
+  if (v < 0) applyDmg(Math.abs(v));
+  else applyHeal(v);
+  document.getElementById('hpDelta').value = '';
+}
+
+function promptSetMaxHP() {
+  const v = prompt('Set max HP:');
+  if (!v) return;
+  const n = parseInt(v);
+  if (isNaN(n) || n < 1) return;
+  char.stat_overrides = char.stat_overrides || {};
+  char.stat_overrides.hp_max = n;
+  state.hp_current = Math.min(state.hp_current, n);
+  addLog(`Max HP set to ${n}.`);
+  updateHPDisplay();
+}
+
+function updateHPDisplay() {
+  renderHPBar();
+  syncResourceEffects();
+  renderEffects();
+  renderActions();
+  debouncedSaveState();
+}
+
+function toggleDS(type, idx) {
+  state.death_saves = state.death_saves || { successes: 0, failures: 0 };
+  const key = type === 'success' ? 'successes' : 'failures';
+  state.death_saves[key] = idx + 1 === state.death_saves[key] ? idx : idx + 1;
+  if (state.death_saves.failures >= 3) { addLog('💀 Three death save failures — character is dead.'); }
+  if (state.death_saves.successes >= 3) { stabilize(); return; }
+  debouncedSaveState();
+  renderTracker();
+}
+
+function stabilize() {
+  state.death_saves = { successes: 0, failures: 0 };
+  state.hp_current = 1;
+  addLog('Character stabilized at 1 HP.');
+  renderTracker();
+}
+
+// ── Slots ────────────────────────────────────────────────────────
+function toggleSlot(level, idx, total) {
+  state.spell_slots_used = state.spell_slots_used || {};
+  const used = state.spell_slots_used[level] || 0;
+  // Toggle: if this dot is at the boundary of used/unused, toggle
+  if (idx < used) {
+    state.spell_slots_used[level] = idx; // restore this slot
+  } else {
+    state.spell_slots_used[level] = idx + 1; // spend up to this slot
+  }
+  debouncedSaveState();
+  reRenderSlots();
+}
+
+function reRenderSlots() {
+  const prog = progression?.find(r => r.level === char.level);
+  if (!prog) return;
+  renderTracker();
+}
+
+function toggleHitDie(idx) {
+  if (!Array.isArray(state.hit_dice_used)) {
+    state.hit_dice_used = Array(char.level).fill(false);
+  }
+  state.hit_dice_used[idx] = !state.hit_dice_used[idx];
+  debouncedSaveState();
+  renderTracker();
+}
+
+// ── Concentration ────────────────────────────────────────────────
+function dropConc() {
+  if (!state.concentration) return;
+  const old = state.concentration;
+  addLog(`Dropped ${old}.`);
+  state.concentration = null;
+  setEffectActive(old, false, '#b48c3c', 0, false, null);
+  debouncedSaveState();
+  renderConcBanner();
+  renderActions();
+}
+
+function renderConcBanner() {
+  const cb = document.getElementById('concBanner');
+  if (!cb) return;
+  if (state.concentration) {
+    cb.className = 'conc-banner';
+    cb.innerHTML = `<span>👁 Concentrating: <strong>${state.concentration}</strong></span><button class="btn btn-brown btn-sm" onclick="dropConc()">Drop</button>`;
+  } else {
+    cb.className = 'hidden';
+  }
+}
+
+// ── Effects ──────────────────────────────────────────────────────
+function dismissEffect(idx) {
+  const eff = state.active_effects?.[idx];
+  if (!eff || eff.locked) return;
+  if (eff) addLog(`Dismissed: ${eff.name}`);
+  state.active_effects?.splice(idx, 1);
+  const res = state.class_resources || {};
+  const source = eff.source || null;
+  if (source === 'form_of_dread' || eff?.name === 'Form of Dread') res.form_active = false;
+  if (source === 'rage' || eff?.name === 'Raging') res.raging = false;
+  if (source === 'wild_shape' || eff?.name === 'Wild Shape') res.wild_shaped = false;
+  if (source === 'mage_armor' || eff?.name === 'Mage Armor') res.mage_armor_active = false;
+  if (source === 'armor_of_agathys' || eff?.name === 'Armor of Agathys') {
+    state.hp_temp = 0;
+    state.hp_temp_source = null;
+  }
+  if (state.concentration && eff?.name === state.concentration) {
+    state.concentration = null;
+    renderConcBanner();
+  }
+  state.class_resources = res;
+  debouncedSaveState();
+  renderTracker();
+}
+
+function addEffect(name, durationRounds, color) {
+  state.active_effects = state.active_effects || [];
+  state.active_effects.push({ name, duration_rounds: durationRounds, color });
+  addLog(`Effect added: ${name}`);
+  renderEffects();
+}
+
+function setEffectActive(name, active, color = '#9860cc', durationRounds = 0, locked = false, source = null) {
+  state.active_effects = state.active_effects || [];
+  const sameName = e => String(e?.name || '').toLowerCase() === String(name || '').toLowerCase();
+  state.active_effects = state.active_effects.filter((e, i, arr) => {
+    if (!sameName(e)) return true;
+    return arr.findIndex(x => sameName(x)) === i;
+  });
+  const idx = state.active_effects.findIndex(e => sameName(e));
+  if (active) {
+    const next = { name, duration_rounds: durationRounds, color, locked, source };
+    if (idx >= 0) state.active_effects[idx] = next;
+    else state.active_effects.push(next);
+  } else if (idx >= 0) {
+    state.active_effects = state.active_effects.filter(e => !sameName(e));
+  }
+}
+
+function syncResourceEffects() {
+  const res = state.class_resources || {};
+  setEffectActive('Form of Dread', !!res.form_active, '#9860cc', state.combat_active ? 10 : 0, false, 'form_of_dread');
+  setEffectActive('Raging', !!res.raging, '#cc4040', state.combat_active ? 10 : 0, false, 'rage');
+  setEffectActive('Wild Shape', !!res.wild_shaped, '#40cc80', 0, false, 'wild_shape');
+  setEffectActive('Mage Armor', !!res.mage_armor_active, '#50a0dc', 0, false, 'mage_armor');
+  setEffectActive('Armor of Agathys', state.hp_temp_source === 'agathys' && (state.hp_temp || 0) > 0, '#50a0dc', 0, false, 'armor_of_agathys');
+
+  const hasNecroticHusk = hasNecroticHuskFeature();
+  const huskSpent = !!res.necrotic_husk_spent;
+  const huskRests = res.necrotic_husk_recover_rests || 0;
+  setEffectActive('Necrotic Husk (Ready)', false, '#7a8aa0', 0, true, 'passive');
+  setEffectActive(`Necrotic Husk (Spent: ${huskRests} LR)`, false, '#7a8aa0', 0, true, 'passive');
+  if (hasNecroticHusk) {
+    setEffectActive(huskSpent ? `Necrotic Husk (Spent: ${huskRests} LR)` : 'Necrotic Husk (Ready)', true, '#7a8aa0', 0, true, 'passive');
+  }
+}
+
+function toggleMageArmor() {
+  const res = state.class_resources || {};
+  res.mage_armor_active = !res.mage_armor_active;
+  state.class_resources = res;
+  setEffectActive('Mage Armor', res.mage_armor_active, '#50a0dc', 0);
+  addLog(res.mage_armor_active ? 'Mage Armor active (AC treated as at least 13 + DEX).' : 'Mage Armor ended.');
+  debouncedSaveState();
+  renderTracker();
+}
+
+// ── Conditions ───────────────────────────────────────────────────
+function toggleCondition(k) {
+  state.conditions = state.conditions || {};
+  state.conditions[k] = !state.conditions[k];
+  debouncedSaveState();
+  renderConditions();
+}
+
+// ── Stat overrides (click to edit) ──────────────────────────────
+function editStat(key) {
+  const labels = { ac: 'AC', initiative: 'Initiative', spell_dc: 'Spell DC', spell_atk: 'Spell Attack bonus' };
+  const current = char.stat_overrides?.[key] ?? '';
+  const v = prompt(`Override ${labels[key] || key} (leave blank to auto-calculate):`, current);
+  if (v === null) return;
+  char.stat_overrides = char.stat_overrides || {};
+  if (v === '') {
+    delete char.stat_overrides[key];
+    toast(`${labels[key]} set to auto`, 'info');
+  } else {
+    const n = parseInt(v);
+    if (isNaN(n)) return;
+    char.stat_overrides[key] = n;
+    toast(`${labels[key]} overridden to ${n}`, 'success');
+  }
+  API.put(`/characters/${charId}`, { stat_overrides: char.stat_overrides }).catch(()=>{});
+  renderOverview();
+}
+
+function editAbility(ab) {
+  const current = char.ability_scores[ab] || 10;
+  const v = prompt(`${ABILITY_FULL[ab]} score:`, current);
+  if (v === null) return;
+  const n = parseInt(v);
+  if (isNaN(n) || n < 1 || n > 30) return;
+  char.ability_scores[ab] = n;
+  API.put(`/characters/${charId}`, { ability_scores: char.ability_scores }).catch(()=>{});
+  renderOverview();
+}
+
+// ── Combat ────────────────────────────────────────────────────────
+function startCombat() {
+  state.combat_active = true;
+  state.combat_round = 1;
+  addLog('── Round 1 ──');
+  renderCombatSection();
+  debouncedSaveState();
+}
+
+function endCombat() {
+  state.combat_active = false;
+  state.combat_round = 0;
+  addLog('Combat ended.');
+  renderCombatSection();
+  debouncedSaveState();
+}
+
+function nextRound() {
+  state.combat_round++;
+  const res = state.class_resources || {};
+  // Tick effect durations
+  const expired = [];
+  state.active_effects = (state.active_effects || []).map(e => {
+    if (e.duration_rounds > 0) {
+      e.duration_rounds--;
+      if (e.duration_rounds <= 0) expired.push(e.name);
+    }
+    return e;
+  }).filter(e => e.duration_rounds !== 0);
+  expired.forEach(n => addLog(`${n} expired.`));
+  // Reset per-round resources
+  if ((char.class_name||'').toLowerCase() === 'warlock') {
+    res.bite_used = false;
+  }
+  state.class_resources = res;
+  addLog(`── Round ${state.combat_round} ──`);
+  renderCombatSection();
+  renderEffects();
+  debouncedSaveState();
+}
+
+// ── Rests ─────────────────────────────────────────────────────────
+function doShortRest() {
+  const cls = (char.class_name || '').toLowerCase();
+  // Warlock recovers pact slots on short rest
+  if (cls === 'warlock') {
+    state.spell_slots_used = {};
+    addLog('☽ Short rest. Pact Magic slots recovered.');
+  } else {
+    addLog('☽ Short rest.');
+  }
+  // Reset short-rest resources
+  const res = state.class_resources || {};
+  if (cls === 'barbarian') { delete res.raging; }
+  if (cls === 'fighter') { delete res.action_surge_used; delete res.second_wind_used; }
+  if (cls === 'monk') { res.ki_used = 0; }
+  state.class_resources = res;
+  state.combat_active = false;
+  state.combat_round = 0;
+  state.active_effects = [];
+  state.concentration = null;
+  debouncedSaveState();
+  renderTracker();
+}
+
+function doLongRest() {
+  const hpMax = char.stat_overrides?.hp_max || state.hp_current;
+  state.hp_current = hpMax;
+  state.hp_temp = 0;
+  state.hp_temp_source = null;
+  state.spell_slots_used = {};
+  // Recover half hit dice (rounded up)
+  const hdTotal = char.level;
+  const hdUsed = Array.isArray(state.hit_dice_used) ? state.hit_dice_used.filter(Boolean).length : 0;
+  const hdRecover = Math.max(1, Math.floor(hdTotal / 2));
+  if (Array.isArray(state.hit_dice_used)) {
+    let left = hdRecover;
+    for (let i = 0; i < state.hit_dice_used.length && left > 0; i++) {
+      if (state.hit_dice_used[i]) { state.hit_dice_used[i] = false; left--; }
+    }
+  } else {
+    state.hit_dice_used = Array(char.level).fill(false);
+  }
+  // Reset all resources with class-specific recovery windows
+  const oldRes = state.class_resources || {};
+  const res = {};
+  if ((char.class_name||'').toLowerCase() === 'warlock') {
+    res.form_uses = 0;
+    if (oldRes.necrotic_husk_spent) {
+      const remaining = Math.max(0, (oldRes.necrotic_husk_recover_rests || 1) - 1);
+      if (remaining > 0) {
+        res.necrotic_husk_spent = true;
+        res.necrotic_husk_recover_rests = remaining;
+      } else {
+        addLog('☠ Necrotic Husk recovered and is ready again.');
+      }
+    }
+  }
+  state.class_resources = res;
+  state.concentration = null;
+  state.active_effects = [];
+  state.combat_active = false;
+  state.combat_round = 0;
+  state.death_saves = { successes: 0, failures: 0 };
+  addLog(`🌙 Long rest. Full HP restored. Up to ${hdRecover} hit dice recovered.`);
+  debouncedSaveState();
+  renderTracker();
+}
+
+// ── Class resource actions ────────────────────────────────────────
+function useEB(beams, chaMod) {
+  addLog(`Eldritch Blast: ${beams} beam${beams > 1 ? 's' : ''}, each 1d10+${chaMod} force (avg ${((5.5 + chaMod) * beams).toFixed(1)})`);
+}
+
+function useBite() {
+  const res = state.class_resources || {};
+  if (res.bite_used) { addLog('Vampiric Bite already used this round!'); return; }
+  res.bite_used = true;
+  state.class_resources = res;
+  const hpMax = char.stat_overrides?.hp_max || state.hp_current;
+  let msg = 'Vampiric Bite: 1d4 piercing';
+  if (state.hp_current <= Math.floor(hpMax / 2)) {
+    const chaMod = abilityMod(char.ability_scores?.cha || 10);
+    state.hp_current = Math.min(hpMax, state.hp_current + chaMod);
+    msg += ` + healed ${chaMod} HP (below half)`;
+  }
+  addLog(msg);
+  debouncedSaveState();
+  renderActions();
+}
+
+function activateForm() {
+  const res = state.class_resources || {};
+  const fuMax = char.level >= 15 ? 4 : char.level >= 10 ? 3 : 2;
+  if (res.form_active) {
+    res.form_active = false;
+    state.class_resources = res;
+    setEffectActive('Form of Dread', false);
+    addLog('Form of Dread ended.');
+    debouncedSaveState();
+    renderActions();
+    renderEffects();
+    return;
+  }
+  if ((res.form_uses || 0) >= fuMax) { addLog('No Form of Dread uses remaining!'); return; }
+  const maxTempHp = 10 + char.level;
+  const v = prompt(`Form of Dread temp HP = 1d10 + warlock level (${char.level}). Enter rolled total (max ${maxTempHp}):`);
+  if (!v) return;
+  const n = parseInt(v);
+  if (isNaN(n) || n <= 0) return;
+  if (n > maxTempHp) {
+    toast(`Form of Dread temp HP cannot exceed ${maxTempHp}.`, 'error');
+    return;
+  }
+  state.hp_temp = n;
+  state.hp_temp_source = 'form';
+  res.form_active = true;
+  res.form_uses = (res.form_uses || 0) + 1;
+  state.class_resources = res;
+  setEffectActive('Form of Dread', true, '#9860cc', state.combat_active ? 10 : 0);
+  addLog(`Form of Dread! ${n} temp HP, fear aura active.`);
+  debouncedSaveState();
+  renderTracker();
+}
+
+function toggleRage() {
+  const res = state.class_resources || {};
+  const rageMax = char.level >= 20 ? 999 : char.level >= 17 ? 6 : char.level >= 13 ? 5 : char.level >= 9 ? 4 : char.level >= 6 ? 3 : 2;
+  if (!res.raging) {
+    if ((res.rages_used || 0) >= rageMax) { addLog('No rages remaining!'); return; }
+    res.raging = true;
+    res.rages_used = (res.rages_used || 0) + 1;
+    setEffectActive('Raging', true, '#cc4040', state.combat_active ? 10 : 0);
+    addLog('RAGE! Resistance to physical damage, bonus damage on STR attacks.');
+  } else {
+    res.raging = false;
+    setEffectActive('Raging', false);
+    addLog('Rage ended.');
+  }
+  state.class_resources = res;
+  debouncedSaveState();
+  renderActions();
+}
+
+function toggleReckless() {
+  const res = state.class_resources || {};
+  res.reckless = !res.reckless;
+  addLog(res.reckless ? 'Reckless Attack: advantage on STR attacks this turn, attacks vs you have advantage.' : 'Reckless Attack ended.');
+  state.class_resources = res;
+  debouncedSaveState();
+  renderActions();
+}
+
+function useSecondWind() {
+  const res = state.class_resources || {};
+  if (res.second_wind_used) { addLog('Second Wind already used (recovers on short rest)!'); return; }
+  const con = abilityMod(char.ability_scores?.con || 10);
+  const roll = Math.floor(Math.random() * char.hit_die || 10) + 1 + char.level;
+  res.second_wind_used = true;
+  state.class_resources = res;
+  state.hp_current = Math.min((char.stat_overrides?.hp_max || state.hp_current), state.hp_current + roll);
+  addLog(`Second Wind! Regained ${roll} HP.`);
+  debouncedSaveState();
+  renderTracker();
+}
+
+function useActionSurge() {
+  const res = state.class_resources || {};
+  const max = char.level >= 17 ? 3 : 1;
+  if ((res.action_surge_used||0) >= max) { addLog('Action Surge already used!'); return; }
+  res.action_surge_used = (res.action_surge_used||0) + 1;
+  state.class_resources = res;
+  addLog('Action Surge! Gain one additional action.');
+  debouncedSaveState();
+  renderActions();
+}
+
+function useIndomitable() {
+  const res = state.class_resources || {};
+  if (res.indomitable_used) { addLog('Indomitable already used!'); return; }
+  res.indomitable_used = true;
+  state.class_resources = res;
+  addLog('Indomitable: reroll a saving throw.');
+  debouncedSaveState();
+  renderActions();
+}
+
+function useKi(cost) {
+  const res = state.class_resources || {};
+  const max = char.level;
+  if ((res.ki_used||0) + cost > max) { addLog(`Not enough Ki points! (${max - (res.ki_used||0)} remaining)`); return; }
+  res.ki_used = (res.ki_used||0) + cost;
+  state.class_resources = res;
+  addLog(`Used ${cost} Ki point${cost>1?'s':`(${max - res.ki_used} remaining)`}`);
+  debouncedSaveState();
+  renderActions();
+}
+
+function useSorceryPoint(cost) {
+  const res = state.class_resources || {};
+  const max = char.level;
+  if ((res.sorcery_points_used||0) + cost > max) { addLog('Not enough Sorcery Points!'); return; }
+  res.sorcery_points_used = (res.sorcery_points_used||0) + cost;
+  state.class_resources = res;
+  addLog(`Used ${cost} Sorcery Point${cost>1?'s':''}.`);
+  debouncedSaveState();
+  renderActions();
+}
+
+function useBardicInspiration() {
+  const res = state.class_resources || {};
+  const max = Math.max(1, abilityMod(char.ability_scores?.cha || 10));
+  if ((res.bardic_inspiration_used||0) >= max) { addLog('No Bardic Inspiration dice remaining!'); return; }
+  res.bardic_inspiration_used = (res.bardic_inspiration_used||0) + 1;
+  state.class_resources = res;
+  addLog('Bardic Inspiration granted to an ally!');
+  debouncedSaveState();
+  renderActions();
+}
+
+function useLayOnHands() {
+  const res = state.class_resources || {};
+  const pool = res.lay_on_hands_pool ?? char.level * 5;
+  const v = prompt(`Lay on Hands — ${pool} HP remaining. How many HP to restore?`);
+  if (!v) return;
+  const n = parseInt(v);
+  if (isNaN(n) || n <= 0 || n > pool) return;
+  res.lay_on_hands_pool = pool - n;
+  state.class_resources = res;
+  addLog(`Lay on Hands: restored ${n} HP. ${pool - n} remaining.`);
+  debouncedSaveState();
+  renderActions();
+}
+
+function toggleWildShape() {
+  const res = state.class_resources || {};
+  const max = char.level >= 18 ? 999 : char.level >= 6 ? 2 : 1;
+  if (!res.wild_shaped) {
+    if ((res.wild_shape_used||0) >= max) { addLog('No Wild Shape uses remaining!'); return; }
+    res.wild_shaped = true;
+    res.wild_shape_used = (res.wild_shape_used||0) + 1;
+    setEffectActive('Wild Shape', true, '#40cc80', 0);
+    addLog('Wild Shape activated!');
+  } else {
+    res.wild_shaped = false;
+    setEffectActive('Wild Shape', false);
+    addLog('Wild Shape ended.');
+  }
+  state.class_resources = res;
+  debouncedSaveState();
+  renderActions();
+}
+
+function useChannelDivinity() {
+  const res = state.class_resources || {};
+  const max = char.level >= 18 ? 3 : char.level >= 6 ? 2 : 1;
+  if ((res.channel_divinity_used||0) >= max) { addLog('No Channel Divinity uses remaining!'); return; }
+  res.channel_divinity_used = (res.channel_divinity_used||0) + 1;
+  state.class_resources = res;
+  addLog('Channel Divinity used!');
+  debouncedSaveState();
+  renderActions();
+}
+
+function quickCast(spellId) {
+  const spell = spellsById[spellId];
+  if (!spell) return;
+  const isAgathys = (spell.name || '').toLowerCase() === 'armor of agathys';
+  if (isAgathys && state.hp_temp_source === 'agathys' && (state.hp_temp || 0) > 0) {
+    state.hp_temp = 0;
+    state.hp_temp_source = null;
+    setEffectActive('Armor of Agathys', false, '#50a0dc', 0);
+    addLog('Armor of Agathys ended.');
+    debouncedSaveState();
+    renderTracker();
+    return;
+  }
+  // Find slot to spend
+  const prog = progression?.find(r => r.level === char.level);
+  if (!prog) return;
+  const slots = prog.spell_slots || [];
+  const used = state.spell_slots_used || {};
+  let slotSpent = false;
+  let slotLevelUsed = spell.level;
+
+  if (char.caster_progression === 'pact') {
+    const pactIdx = slots.findIndex(n => n > 0);
+    if (pactIdx >= 0 && (used[pactIdx]||0) < slots[pactIdx]) {
+      used[pactIdx] = (used[pactIdx]||0) + 1;
+      slotSpent = true;
+      slotLevelUsed = pactIdx + 1;
+    }
+  } else {
+    for (let l = Math.max(0, spell.level - 1); l < 9; l++) {
+      if ((slots[l]||0) > (used[l]||0)) {
+        used[l] = (used[l]||0) + 1;
+        slotSpent = true;
+        slotLevelUsed = l + 1;
+        break;
+      }
+    }
+  }
+
+  if (!slotSpent) { addLog('No spell slots available!'); return; }
+  state.spell_slots_used = used;
+
+  if (spell.concentration) {
+    if (state.concentration) {
+      const old = state.concentration;
+      addLog(`Dropped ${old}.`);
+      setEffectActive(old, false, '#b48c3c', 0, false, null);
+    }
+    state.concentration = spell.name;
+    renderConcBanner();
+  }
+
+  if (isAgathys) {
+    const temp = 5 * Math.max(1, slotLevelUsed || spell.level || 1);
+    state.hp_temp = temp;
+    state.hp_temp_source = 'agathys';
+    setEffectActive('Armor of Agathys', true, '#50a0dc', 0);
+    addLog(`Armor of Agathys: gained ${temp} temp HP (retaliates while temp HP remains).`);
+  }
+
+  if (isTrackableSpellEffect(spell)) {
+    const rounds = durationToRounds(spell.duration_text);
+    const color = spell.concentration ? '#b48c3c' : '#6080cc';
+    setEffectActive(spell.name, true, color, rounds, false, `spell:${spell.id}`);
+  }
+
+  addLog(`Cast ${spell.name}! (${spell.casting_time}${spell.concentration?' · Concentration':''}${spell.ritual?' · Ritual':''})`);
+  debouncedSaveState();
+  renderTracker();
+}
+
+// ── SPELLS TAB ────────────────────────────────────────────────────
+function renderSpells() {
+  const container = document.getElementById('spellsContent');
+  if (!char.spellcasting_type) {
+    container.innerHTML = `<div class="loading-tab" style="color:var(--dim)">This character has no spellcasting.</div>`;
+    return;
+  }
+
+  const knownIds = new Set([...(char.spells_known||[]), ...(char.spellbook||[])]);
+  const spells = allSpells.filter(s => knownIds.has(s.id));
+
+  if (!spells.length) {
+    container.innerHTML = `<div class="loading-tab" style="color:var(--dim)">No spells added. <a href="/builder.html?edit=${charId}&step=4" style="color:var(--gold)">Edit spells</a> to add them.</div>`;
+    return;
+  }
+
+  const prog = progression?.find(r => r.level === char.level);
+  const slots = prog?.spell_slots || [];
+  const used = state.spell_slots_used || {};
+  const isPact = char.caster_progression === 'pact';
+
+  // Slot tracker at top
+  let slotHtml = '<div class="card"><div class="card-label">Spell Slots</div>';
+  if (isPact) {
+    const pactIdx = slots.findIndex(n => n > 0);
+    if (pactIdx >= 0) {
+      slotHtml += `<div class="slot-row"><div class="slot-row-label">Pact Magic (${ordinal(pactIdx+1)}-level) — Short rest recovery</div><div class="slot-dots">`;
+      for (let i = 0; i < slots[pactIdx]; i++) {
+        slotHtml += `<div class="slot-dot ${i < (used[pactIdx]||0) ? 'empty' : 'full'}" onclick="toggleSlot(${pactIdx},${i},${slots[pactIdx]})"></div>`;
+      }
+      slotHtml += '</div></div>';
+    }
+  } else {
+    for (let l = 0; l < 9; l++) {
+      if (!slots[l]) continue;
+      slotHtml += `<div class="slot-row"><div class="slot-row-label">${ordinal(l+1)} Level</div><div class="slot-dots">`;
+      for (let i = 0; i < slots[l]; i++) {
+        slotHtml += `<div class="slot-dot ${i < (used[l]||0) ? 'empty' : 'full'}" onclick="toggleSlot(${l},${i},${slots[l]})"></div>`;
+      }
+      slotHtml += '</div></div>';
+    }
+  }
+  slotHtml += '</div>';
+
+  // Group spells by level
+  const byLevel = {};
+  for (const sp of spells) {
+    if (!byLevel[sp.level]) byLevel[sp.level] = [];
+    byLevel[sp.level].push(sp);
+  }
+
+  // Prepared spells for prepared casters
+  const isPrepared = char.spellcasting_type === 'prepared';
+  const prepared = new Set(state.prepared_spells || []);
+
+  let spellsHtml = '';
+  for (const [lvl, levelSpells] of Object.entries(byLevel).sort((a,b) => +a[0] - +b[0])) {
+    spellsHtml += `<div class="spell-level-divider">${+lvl === 0 ? 'Cantrips' : `${ordinal(+lvl)}-Level Spells`}</div>`;
+    for (const sp of levelSpells.sort((a,b) => a.name.localeCompare(b.name))) {
+      const noSlot = +lvl > 0 && checkNoSlots(+lvl);
+      const isPreparedNow = isPrepared ? prepared.has(sp.id) : true;
+      spellsHtml += renderSpellCard(sp, noSlot, isPrepared, isPreparedNow);
+    }
+  }
+
+  container.innerHTML = slotHtml + spellsHtml;
+}
+
+function renderSpellCard(sp, noSlot, showPrepared, isPreparedNow) {
+  const school = SCHOOL_NAMES[sp.school] || sp.school;
+  const badges = (sp.concentration ? '<span class="conc-badge">C</span>' : '') +
+                 (sp.ritual ? '<span class="ritual-badge">R</span>' : '');
+  const castDisabled = (noSlot && sp.level > 0) || (showPrepared && !isPreparedNow);
+
+  const prepDot = showPrepared && sp.level > 0 ? `
+    <div class="prepared-dot ${isPreparedNow ? '' : 'empty'}" style="background:${isPreparedNow?'rgba(64,204,128,0.4)':'transparent'};border-color:${isPreparedNow?'#40cc80':'#3a3428'}" onclick="event.stopPropagation();togglePrepared(${sp.id})" title="${isPreparedNow?'Prepared':'Not prepared — click to prepare'}"></div>
+  ` : '';
+
+  const bodyId = `sc${sp.id}`;
+  const isOpen = isCardOpen(bodyId);
+  return `
+    <div class="spell-card">
+      <div class="spell-card-header" onclick="toggleSpellCard('${bodyId}')">
+        ${prepDot}
+        <div class="spell-card-name">${sp.name}${badges}</div>
+        <div class="spell-card-meta">${sp.level === 0 ? 'Cantrip' : `${ordinal(sp.level)}`} ${school.slice(0,3)}</div>
+        <button class="cast-btn" ${castDisabled ? 'disabled' : ''} onclick="event.stopPropagation();quickCast(${sp.id})" style="${sp.level === 0 ? 'display:none' : ''}">Cast</button>
+      </div>
+      <div class="spell-card-body ${isOpen ? 'open' : ''}" id="${bodyId}">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;font-size:11px;color:var(--dim);margin-bottom:8px">
+          <div><strong style="color:var(--text)">Casting:</strong> ${sp.casting_time || '—'}</div>
+          <div><strong style="color:var(--text)">Range:</strong> ${sp.range_text || '—'}</div>
+          <div><strong style="color:var(--text)">Duration:</strong> ${sp.duration_text || '—'}</div>
+          <div><strong style="color:var(--text)">Components:</strong> ${formatComponents(sp.components)}</div>
+        </div>
+        <div id="sdesc${sp.id}" style="font-size:11px;color:var(--dim)">Click to load description...</div>
+      </div>
+    </div>
+  `;
+}
+
+function formatComponents(c) {
+  if (!c) return '—';
+  const parts = [];
+  if (c.v) parts.push('V');
+  if (c.s) parts.push('S');
+  if (c.m) parts.push(`M`);
+  return parts.join(', ') || '—';
+}
+
+async function toggleSpellCard(id) {
+  const opened = toggleCardById(id, id);
+  const body = document.getElementById(id);
+  if (!body) return;
+  if (opened) {
+    const spellId = parseInt(id.replace('sc',''));
+    const descEl = document.getElementById(`sdesc${spellId}`);
+    if (descEl && descEl.textContent.includes('Click to load')) {
+      try {
+        const full = await API.get(`/spells/${spellId}`);
+        descEl.innerHTML = renderEntries(full.data?.entries || []);
+        if (full.data?.entriesHigherLevel?.[0]) {
+          descEl.innerHTML += `<div style="margin-top:6px;color:#6080cc"><strong>At Higher Levels:</strong> ${renderEntries(full.data.entriesHigherLevel[0].entries || [])}</div>`;
+        }
+        if (full.components?.m) {
+          descEl.innerHTML += `<div style="margin-top:4px;color:var(--dim);font-style:italic">Material: ${full.components.m}</div>`;
+        }
+      } catch(e) { descEl.textContent = 'Failed to load description.'; }
+    }
+  }
+}
+
+function togglePrepared(id) {
+  state.prepared_spells = state.prepared_spells || [];
+  const idx = state.prepared_spells.indexOf(id);
+  if (idx >= 0) state.prepared_spells.splice(idx, 1);
+  else state.prepared_spells.push(id);
+  debouncedSaveState();
+  renderSpells();
+}
+
+// ── FEATURES TAB ─────────────────────────────────────────────────
+function renderFeatures() {
+  const container = document.getElementById('featuresContent');
+  let html = '';
+
+  // Race traits
+  if (char.race_id) {
+    html += `<div class="feature-section-label">Racial Traits — ${char.race_name}</div>`;
+    html += `<div id="raceTraitsFeatures"><div style="font-size:12px;color:var(--dim)">Loading...</div></div>`;
+  }
+
+  // Class features
+  if (classFeatures.length) {
+    html += `<div class="feature-section-label">Class Features — ${char.class_name}</div>`;
+    html += classFeatures.map(f => renderFeatureCard(f, 'cf')).join('');
+  }
+
+  // Subclass features
+  if (subFeatures.length) {
+    html += `<div class="feature-section-label">Subclass Features — ${char.subclass_name}</div>`;
+    html += subFeatures.map(f => renderFeatureCard(f, 'sf')).join('');
+  }
+
+  // Feats
+  if ((char.feats||[]).length) {
+    html += `<div class="feature-section-label">Feats</div>`;
+    html += `<div id="featFeatures"><div style="font-size:12px;color:var(--dim)">Loading...</div></div>`;
+  }
+
+  const choiceGroups = extractFeatureChoiceGroups([...(classFeatures || []), ...(subFeatures || [])]);
+  if (choiceGroups.length) {
+    html += `<div class="feature-section-label">Class Feature Choices</div>`;
+    html += `<div id="featureChoices"><div style="font-size:12px;color:var(--dim)">Loading choices...</div></div>`;
+  }
+
+  const optTypes = extractOptionalFeatureTypes([...(classFeatures || []), ...(subFeatures || [])]);
+  if (optTypes.length) {
+    html += `<div class="feature-section-label">Class Options</div>`;
+    html += `<div id="optionalFeatures"><div style="font-size:12px;color:var(--dim)">Loading class options...</div></div>`;
+  }
+
+  if (!html) html = `<div class="loading-tab" style="color:var(--dim)">No features loaded.</div>`;
+  container.innerHTML = html;
+
+  // Async: load race traits
+  if (char.race_id) {
+    API.get(`/races/${char.race_id}`).then(r => {
+      const el = document.getElementById('raceTraitsFeatures');
+      if (!el) return;
+      const traits = (r.data?.entries || []).filter(e => typeof e === 'object' && e.name);
+      el.innerHTML = traits.map((t, i) => {
+        const bodyId = `race_trait_${char.race_id}_${i}`;
+        return `
+        <div class="feature-card">
+          <div class="feature-header" onclick="toggleFeatureCard('${bodyId}')">
+            <div class="feature-name">${t.name}</div>
+          </div>
+          <div class="feature-body ${isCardOpen(bodyId) ? 'open' : ''}" id="${bodyId}">${renderEntries(t.entries||[])}</div>
+        </div>
+      `;
+      }).join('') || `<div style="font-size:12px;color:var(--dim)">No traits data available.</div>`;
+    }).catch(()=>{});
+  }
+
+  // Async: load feat details
+  if ((char.feats||[]).length) {
+    Promise.all(char.feats.map(id => API.get(`/feats/${id}`))).then(feats => {
+      const el = document.getElementById('featFeatures');
+      if (!el) return;
+      el.innerHTML = feats.map(f => {
+        const bodyId = `feat_${f.id}`;
+        return `
+        <div class="feature-card">
+          <div class="feature-header" onclick="toggleFeatureCard('${bodyId}')">
+            <div class="feature-name">${f.name}</div>
+            <div class="feature-level">${f.source}</div>
+          </div>
+          <div class="feature-body ${isCardOpen(bodyId) ? 'open' : ''}" id="${bodyId}">${renderEntries(f.data?.entries||[])}</div>
+        </div>
+      `;
+      }).join('');
+    }).catch(()=>{});
+  }
+
+  if (optTypes.length) {
+    Promise.all(optTypes.map(t =>
+      API.get(`/optional-features?featureType=${encodeURIComponent(t)}&class=${encodeURIComponent((char.class_name || '').toLowerCase())}&level=${char.level}`)
+        .then(list => ({ type: t, list }))
+        .catch(() => ({ type: t, list: [] }))
+    )).then(groups => {
+      const el = document.getElementById('optionalFeatures');
+      if (!el) return;
+      if (!groups.some(g => g.list.length)) {
+        el.innerHTML = `<div style="font-size:12px;color:var(--dim)">No optional features available at this level.</div>`;
+        return;
+      }
+      el.innerHTML = groups.map(g => renderOptionalTypeSection(g.type, g.list)).join('');
+    }).catch(() => {});
+  }
+
+  if (choiceGroups.length) {
+    const el = document.getElementById('featureChoices');
+    if (el) {
+      el.innerHTML = choiceGroups.map(g => renderFeatureChoiceGroup(g)).join('');
+    }
+  }
+}
+
+function normalizeRefText(ref) {
+  const [name, source] = String(ref || '').split('|');
+  return { name: (name || '').trim(), source: (source || '').trim() };
+}
+
+function getOptionalFeatureByRef(ref) {
+  const r = normalizeRefText(ref);
+  if (!r.name) return null;
+  const key = `${r.name.toLowerCase()}|${r.source.toLowerCase()}`;
+  return optionalFeaturesByRef[key] || optionalFeaturesByRef[r.name.toLowerCase()] || null;
+}
+
+function extractFeatureChoiceGroups(features) {
+  const groups = [];
+  for (const f of (features || [])) {
+    let localIdx = 0;
+    const walk = node => {
+      if (!node) return;
+      if (Array.isArray(node)) { node.forEach(walk); return; }
+      if (typeof node !== 'object') return;
+      if (node.type === 'options' && Array.isArray(node.entries)) {
+        const refs = node.entries
+          .filter(e => e?.type === 'refOptionalfeature' && e.optionalfeature)
+          .map(e => e.optionalfeature);
+        if (refs.length) {
+          const opts = refs.map(getOptionalFeatureByRef).filter(Boolean);
+          if (opts.length) {
+            groups.push({
+              id: `choice_${f.id}_${localIdx++}`,
+              label: `${f.name} (Lv ${f.level})`,
+              count: parseInt(node.count, 10) || 1,
+              options: opts,
+            });
+          }
+        }
+      }
+      if (node.entries) walk(node.entries);
+      if (node.items) walk(node.items);
+    };
+    walk(f.entries);
+  }
+  return groups;
+}
+
+function renderFeatureChoiceGroup(group) {
+  const selected = (featureChoiceSelections[group.id] || []).filter(Boolean);
+  const selectedSet = new Set(selected);
+  const selectedFeatures = group.options.filter(o => selectedSet.has(o.id));
+  let html = `<div class="card"><div class="card-label">${group.label} (${selected.length}/${group.count})</div>`;
+
+  for (let i = 0; i < group.count; i++) {
+    const cur = selected[i] || '';
+    html += `
+      <div class="field" style="margin-bottom:8px">
+        <label>Choice ${i + 1}</label>
+        <select onchange="setFeatureChoice('${group.id}',${i},this.value)">
+          <option value="">— Select option —</option>
+          ${group.options.map(o => {
+            const usedElsewhere = selected.some((id, idx) => idx !== i && id === o.id);
+            return `<option value="${o.id}" ${String(cur) === String(o.id) ? 'selected' : ''} ${usedElsewhere ? 'disabled' : ''}>${o.name} (${o.source})</option>`;
+          }).join('')}
+        </select>
+      </div>
+    `;
+  }
+
+  if (selectedFeatures.length) {
+    html += selectedFeatures.map(o => {
+      const bodyId = `choice_opt_${group.id}_${o.id}`;
+      return `
+        <div class="feature-card">
+          <div class="feature-header" onclick="toggleFeatureCard('${bodyId}')">
+            <div class="feature-name">${o.name}</div>
+            <div class="feature-level">${o.source}</div>
+          </div>
+          <div class="feature-body ${isCardOpen(bodyId) ? 'open' : ''}" id="${bodyId}">${renderEntries(o.entries || [])}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  html += `</div>`;
+  return html;
+}
+
+async function setFeatureChoice(groupId, idx, value) {
+  const arr = [...(featureChoiceSelections[groupId] || [])];
+  const id = value ? parseInt(value, 10) : null;
+  if (id && arr.some((v, i) => i !== idx && v === id)) {
+    toast('That option is already selected.', 'warn');
+    return;
+  }
+  arr[idx] = id || null;
+  featureChoiceSelections[groupId] = arr.filter(Boolean);
+  char.stat_overrides = char.stat_overrides || {};
+  char.stat_overrides.feature_choice_selections = featureChoiceSelections;
+  try {
+    await API.put(`/characters/${charId}`, { stat_overrides: char.stat_overrides });
+  } catch (e) {
+    toast('Failed to save feature choice.', 'error');
+  }
+  renderFeatures();
+}
+
+function optionalTypeLabel(type) {
+  const map = {
+    EI: 'Eldritch Invocations',
+    'FS:F': 'Fighting Style (Fighter)',
+    'FS:R': 'Fighting Style (Ranger)',
+  };
+  return map[type] || `Options (${type})`;
+}
+
+function optionalKnownCount(type) {
+  const lvlProg = progression?.find(r => r.level === char.level);
+  if (!lvlProg) return null;
+  const cls = (char.class_name || '').toLowerCase();
+  if (type === 'EI' && cls === 'warlock') {
+    return lvlProg.class_specific?.extra ?? 0;
+  }
+  return null;
+}
+
+function renderOptionalTypeSection(type, list) {
+  const maxKnown = optionalKnownCount(type);
+  const selected = (optionalFeatureSelections[type] || []).filter(id => list.some(f => f.id === id));
+  const selectedSet = new Set(selected);
+  const selectedFeatures = list.filter(f => selectedSet.has(f.id));
+
+  let html = `<div class="feature-section-label" style="margin-top:8px">${optionalTypeLabel(type)}</div>`;
+  if (!selectedFeatures.length) {
+    html += `<div style="font-size:12px;color:var(--dim);margin-bottom:8px">No selections yet.</div>`;
+  } else {
+    html += selectedFeatures.map(f => {
+      const bodyId = `opt_${type}_${f.id}`;
+      return `
+      <div class="feature-card">
+        <div class="feature-header" onclick="toggleFeatureCard('${bodyId}')">
+          <div class="feature-name">${f.name}</div>
+          <div class="feature-level">${f.source}</div>
+        </div>
+        <div class="feature-body ${isCardOpen(bodyId) ? 'open' : ''}" id="${bodyId}">${renderEntries(f.entries || [])}</div>
+      </div>
+    `;
+    }).join('');
+  }
+
+  if (maxKnown !== null) {
+    const isOpen = !!optionalFeatureEditorOpen[type] || selected.length < maxKnown;
+    html += `<div class="card" style="margin-top:6px"><div style="display:flex;align-items:center;justify-content:space-between"><div class="card-label" style="margin-bottom:0">Selections (${selected.length}/${maxKnown})</div><button class="btn btn-gold btn-sm" onclick="toggleOptionalFeatureEditor('${type}')">${isOpen ? 'Done' : 'Edit'}</button></div>`;
+    if (isOpen) {
+      html += `<div style="margin-top:8px">`;
+      for (let i = 0; i < maxKnown; i++) {
+        const current = selected[i] || '';
+        html += `
+          <div class="field" style="margin-bottom:8px">
+            <label>Choice ${i + 1}</label>
+            <select onchange="setOptionalFeatureChoice('${type}',${i},this.value)">
+              <option value="">— Select option —</option>
+              ${list.map(f => {
+                const usedElsewhere = selected.some((id, idx) => idx !== i && id === f.id);
+                return `<option value="${f.id}" ${String(current) === String(f.id) ? 'selected' : ''} ${usedElsewhere ? 'disabled' : ''}>${f.name} (${f.source})</option>`;
+              }).join('')}
+            </select>
+          </div>
+        `;
+      }
+      html += `</div>`;
+    }
+    html += `</div>`;
+  }
+
+  return html;
+}
+
+async function setOptionalFeatureChoice(type, idx, value) {
+  const arr = [...(optionalFeatureSelections[type] || [])];
+  const id = value ? parseInt(value, 10) : null;
+  if (id && arr.some((v, i) => i !== idx && v === id)) {
+    toast('That option is already selected.', 'warn');
+    return;
+  }
+  arr[idx] = id || null;
+  optionalFeatureSelections[type] = arr.filter(Boolean);
+  char.stat_overrides = char.stat_overrides || {};
+  char.stat_overrides.optional_feature_selections = optionalFeatureSelections;
+  try {
+    await API.put(`/characters/${charId}`, { stat_overrides: char.stat_overrides });
+  } catch (e) {
+    toast('Failed to save class option.', 'error');
+  }
+  const maxKnown = optionalKnownCount(type);
+  if (maxKnown !== null && optionalFeatureSelections[type].length >= maxKnown) {
+    optionalFeatureEditorOpen[type] = false;
+  }
+  renderFeatures();
+}
+
+function toggleOptionalFeatureEditor(type) {
+  optionalFeatureEditorOpen[type] = !optionalFeatureEditorOpen[type];
+  renderFeatures();
+}
+
+function extractOptionalFeatureTypes(features) {
+  const types = new Set();
+  const re = /Feature Type=([^}|]+)/g;
+
+  const walk = node => {
+    if (typeof node === 'string') {
+      let m;
+      while ((m = re.exec(node)) !== null) {
+        const t = (m[1] || '').trim();
+        if (t) types.add(t);
+      }
+      return;
+    }
+    if (Array.isArray(node)) {
+      node.forEach(walk);
+      return;
+    }
+    if (node && typeof node === 'object') {
+      if (node.entries) walk(node.entries);
+      if (node.items) walk(node.items);
+      if (node.entry) walk(node.entry);
+    }
+  };
+
+  for (const f of (features || [])) walk(f.entries);
+  return [...types];
+}
+
+function renderFeatureCard(f, prefix) {
+  const bodyId = `fc_${prefix}_${f.id}`;
+  return `
+    <div class="feature-card">
+      <div class="feature-header" onclick="toggleFeatureCard('${bodyId}')">
+        <div class="feature-name">${f.name}</div>
+        <div class="feature-level">Lv ${f.level}</div>
+      </div>
+      <div class="feature-body ${isCardOpen(bodyId) ? 'open' : ''}" id="${bodyId}">${renderEntries(f.entries)}</div>
+    </div>
+  `;
+}
+
+function toggleFeatureCard(bodyId) {
+  toggleCardById(bodyId, bodyId);
+}
+
+// ── INVENTORY TAB ─────────────────────────────────────────────────
+function renderInventory() {
+  const container = document.getElementById('inventoryContent');
+
+  const totalWeight = inventory.reduce((sum, item) => sum + ((item.weight || 0) * item.quantity), 0);
+  const strScore = char.ability_scores?.str || 10;
+  const carryCapacity = strScore * 15;
+
+  const typeColors = { weapon:'#cc4040', armor:'#50a0dc', consumable:'#40cc80', magic:'#9860cc', tool:'#cc9040', treasure:'#e8c170', misc:'#5a5040' };
+
+  const curr = currency;
+
+  container.innerHTML = `
+    <div class="card">
+      <div class="card-label">Currency</div>
+      <div class="currency-row">
+        ${['cp','sp','ep','gp','pp'].map(coin => `
+          <div class="currency-coin">
+            <label>${coin.toUpperCase()}</label>
+            <input type="number" min="0" value="${curr[coin]||0}" oninput="updateCurrency('${coin}',this.value)">
+          </div>
+        `).join('')}
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div class="card-label" style="margin-bottom:0">Inventory</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span style="font-size:10px;color:var(--dim)">${totalWeight.toFixed(1)} / ${carryCapacity} lbs</span>
+          <button class="btn btn-gold btn-sm" onclick="openItemModal()">+ Add Item</button>
+        </div>
+      </div>
+      ${inventory.length ? `
+        <table class="inv-table">
+          <thead><tr>
+            <th>Item</th><th>Qty</th><th>Wt</th><th>Value</th><th>Eq</th><th></th>
+          </tr></thead>
+          <tbody>
+            ${inventory.map(item => `
+              <tr>
+                <td>
+                  <div class="inv-name">${item.name}</div>
+                  <span class="inv-type" style="background:${typeColors[item.item_type]||'#5a5040'}18;color:${typeColors[item.item_type]||'#5a5040'};border:1px solid ${typeColors[item.item_type]||'#5a5040'}33">${item.item_type}</span>
+                  ${item.notes ? `<div style="font-size:10px;color:var(--dim);margin-top:2px">${item.notes}</div>` : ''}
+                </td>
+                <td style="text-align:center"><input type="number" min="1" value="${item.quantity}" style="width:44px;background:#1a1510;border:1px solid var(--border);border-radius:3px;color:var(--text);padding:2px 4px;font-size:12px;font-family:inherit;outline:none;text-align:center" oninput="updateItem(${item.id},'quantity',this.value)"></td>
+                <td style="font-size:11px;color:var(--dim)">${item.weight ? item.weight+'lb' : '—'}</td>
+                <td style="font-size:11px;color:var(--dim)">${item.value_gp != null ? item.value_gp+'gp' : '—'}</td>
+                <td><div class="equipped-dot ${item.equipped ? 'on' : 'off'}" onclick="toggleEquipped(${item.id},${item.equipped})" title="${item.equipped ? 'Equipped — click to unequip' : 'Not equipped — click to equip'}"></div></td>
+                <td><button class="btn btn-dim btn-sm" onclick="deleteItem(${item.id})" style="padding:2px 6px">✕</button></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      ` : `<div style="font-size:12px;color:var(--dim);text-align:center;padding:20px">No items yet.</div>`}
+    </div>
+  `;
+}
+
+const debouncedSaveCurrency = debounce(async () => {
+  try { await API.put(`/characters/${charId}/currency`, currency); } catch(e) {}
+}, 800);
+
+function updateCurrency(coin, val) {
+  currency[coin] = parseInt(val) || 0;
+  debouncedSaveCurrency();
+}
+
+async function updateItem(id, field, val) {
+  const item = inventory.find(i => i.id === id);
+  if (!item) return;
+  item[field] = field === 'quantity' ? (parseInt(val)||1) : val;
+  try { await API.put(`/characters/${charId}/inventory/${id}`, { [field]: item[field] }); } catch(e) {}
+}
+
+async function toggleEquipped(id, current) {
+  const item = inventory.find(i => i.id === id);
+  if (!item) return;
+  item.equipped = !current;
+  try { await API.put(`/characters/${charId}/inventory/${id}`, { equipped: item.equipped }); } catch(e) {}
+  renderInventory();
+}
+
+async function deleteItem(id) {
+  if (!confirm('Remove this item?')) return;
+  try {
+    await API.del(`/characters/${charId}/inventory/${id}`);
+    inventory = inventory.filter(i => i.id !== id);
+    renderInventory();
+  } catch(e) { toast('Failed to delete item.', 'error'); }
+}
+
+function openItemModal(editId) {
+  editingItemId = editId || null;
+  document.getElementById('itemModalTitle').textContent = editId ? 'Edit Item' : 'Add Item';
+  if (editId) {
+    const item = inventory.find(i => i.id === editId);
+    if (item) {
+      document.getElementById('itemName').value = item.name;
+      document.getElementById('itemType').value = item.item_type;
+      document.getElementById('itemQty').value = item.quantity;
+      document.getElementById('itemWeight').value = item.weight || '';
+      document.getElementById('itemValue').value = item.value_gp ?? '';
+      document.getElementById('itemNotes').value = item.notes || '';
+    }
+  } else {
+    document.getElementById('itemName').value = '';
+    document.getElementById('itemType').value = 'misc';
+    document.getElementById('itemQty').value = '1';
+    document.getElementById('itemWeight').value = '';
+    document.getElementById('itemValue').value = '';
+    document.getElementById('itemNotes').value = '';
+  }
+  document.getElementById('itemModal').classList.remove('hidden');
+  setTimeout(() => document.getElementById('itemName').focus(), 50);
+}
+
+function closeItemModal() {
+  document.getElementById('itemModal').classList.add('hidden');
+}
+
+async function saveItem() {
+  const name = document.getElementById('itemName').value.trim();
+  if (!name) { toast('Item name required.', 'error'); return; }
+  const payload = {
+    name,
+    item_type: document.getElementById('itemType').value,
+    quantity: parseInt(document.getElementById('itemQty').value) || 1,
+    weight: parseFloat(document.getElementById('itemWeight').value) || null,
+    value_gp: parseFloat(document.getElementById('itemValue').value) ?? null,
+    notes: document.getElementById('itemNotes').value.trim(),
+  };
+  try {
+    if (editingItemId) {
+      const updated = await API.put(`/characters/${charId}/inventory/${editingItemId}`, payload);
+      const idx = inventory.findIndex(i => i.id === editingItemId);
+      if (idx >= 0) inventory[idx] = updated;
+    } else {
+      const item = await API.post(`/characters/${charId}/inventory`, payload);
+      inventory.push(item);
+    }
+    closeItemModal();
+    renderInventory();
+    toast(editingItemId ? 'Item updated.' : 'Item added.', 'success');
+  } catch(e) { toast(`Failed: ${e.message}`, 'error'); }
+}
+
+// ── NOTES TAB ────────────────────────────────────────────────────
+function renderNotes() {
+  const container = document.getElementById('notesContent');
+  const fields = [
+    { key: 'backstory', label: 'Backstory', rows: 8 },
+    { key: 'personality_traits', label: 'Personality Traits', rows: 3 },
+    { key: 'ideals', label: 'Ideals', rows: 3 },
+    { key: 'bonds', label: 'Bonds', rows: 3 },
+    { key: 'flaws', label: 'Flaws', rows: 3 },
+    { key: 'appearance', label: 'Appearance', rows: 4 },
+  ];
+
+  container.innerHTML = `<div style="padding:0">` + fields.map(f => `
+    <div class="card notes-field" style="margin-bottom:8px">
+      <label>${f.label}</label>
+      <textarea rows="${f.rows}" id="note_${f.key}" onblur="saveNote('${f.key}',this.value)">${char[f.key]||''}</textarea>
+    </div>
+  `).join('') + `</div>`;
+}
+
+const debouncedSaveNotes = debounce(async (key, val) => {
+  char[key] = val;
+  try { await API.put(`/characters/${charId}`, { [key]: val }); } catch(e) {}
+}, 1000);
+
+function saveNote(key, val) {
+  debouncedSaveNotes(key, val);
+}
+
+init();
+</script>
+</body>
+</html>

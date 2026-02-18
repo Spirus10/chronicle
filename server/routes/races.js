@@ -1,0 +1,49 @@
+'use strict';
+const express = require('express');
+const db = require('../db');
+const router = express.Router();
+
+// GET /api/races — list all (base races + subraces)
+router.get('/', (req, res) => {
+  const rows = db.prepare(`
+    SELECT id, name, source, parent_race_id, speed_json, ability_json, darkvision, trait_tags
+    FROM races ORDER BY parent_race_id NULLS FIRST, name
+  `).all();
+  res.json(rows.map(r => ({
+    ...r,
+    speed: JSON.parse(r.speed_json || '{}'),
+    ability: JSON.parse(r.ability_json || '[]'),
+    trait_tags: JSON.parse(r.trait_tags || '[]'),
+    speed_json: undefined,
+    ability_json: undefined,
+  })));
+});
+
+// GET /api/races/:id — race detail with full data
+router.get('/:id', (req, res) => {
+  const race = db.prepare(`
+    SELECT id, name, source, parent_race_id, speed_json, ability_json, darkvision, trait_tags, data_json
+    FROM races WHERE id = ?
+  `).get(req.params.id);
+  if (!race) return res.status(404).json({ error: 'Race not found' });
+
+  // Include subraces if this is a base race
+  const subraces = race.parent_race_id === null
+    ? db.prepare('SELECT id, name, source FROM races WHERE parent_race_id = ? ORDER BY name').all(race.id)
+    : [];
+
+  res.json({
+    id: race.id,
+    name: race.name,
+    source: race.source,
+    parent_race_id: race.parent_race_id,
+    darkvision: race.darkvision,
+    speed: JSON.parse(race.speed_json || '{}'),
+    ability: JSON.parse(race.ability_json || '[]'),
+    trait_tags: JSON.parse(race.trait_tags || '[]'),
+    data: JSON.parse(race.data_json),
+    subraces,
+  });
+});
+
+module.exports = router;

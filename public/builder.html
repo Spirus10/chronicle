@@ -1,0 +1,1461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>New Character — DND Tracker</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0a0f;--card:rgba(20,18,15,0.85);--border:#2a2520;
+  --gold:#e8c170;--text:#c8bfa9;--dim:#5a5040;--dim2:#3a3428;
+  --red:#8b2020;--purple:#9860cc;--blue:#50a0dc;--green:#40cc80;
+}
+body{background:var(--bg);color:var(--text);font-family:'Crimson Text','Garamond','Georgia',serif;min-height:100vh;position:relative;overflow-x:hidden}
+body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellipse at 20% 50%,rgba(40,10,20,0.5) 0%,transparent 60%),radial-gradient(ellipse at 80% 20%,rgba(15,10,35,0.4) 0%,transparent 50%);pointer-events:none;z-index:0}
+.wrap{max-width:640px;margin:0 auto;padding:24px 16px 80px;position:relative;z-index:1}
+
+/* Header */
+.page-header{display:flex;align-items:center;gap:16px;margin-bottom:32px;padding-top:16px}
+.back-link{color:var(--dim);font-size:12px;letter-spacing:1px;text-decoration:none;transition:color 0.2s}
+.back-link:hover{color:var(--gold)}
+.page-title{font-size:28px;font-weight:700;letter-spacing:4px;color:var(--gold)}
+
+/* Steps nav */
+.steps{display:flex;gap:4px;margin-bottom:28px}
+.step-dot{flex:1;height:3px;border-radius:2px;background:var(--dim2);transition:background 0.3s;border:none;padding:0}
+.step-dot.done{background:rgba(232,193,112,0.5)}
+.step-dot.active{background:var(--gold)}
+
+.step-tabs{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin:0 0 16px}
+.step-tab{background:#14110d;border:1px solid var(--border);border-radius:6px;color:var(--dim);font-family:inherit;font-size:10px;letter-spacing:1px;padding:8px 6px;cursor:pointer}
+.step-tab.active{border-color:rgba(232,193,112,0.5);color:var(--gold);background:rgba(232,193,112,0.08)}
+.step-tab:hover{border-color:rgba(232,193,112,0.25);color:var(--text)}
+
+/* Step label */
+.step-label{font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--dim);margin-bottom:20px}
+
+/* Card */
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:20px;margin-bottom:14px;backdrop-filter:blur(10px)}
+.card-title{font-size:10px;letter-spacing:2.5px;text-transform:uppercase;color:var(--dim);margin-bottom:14px}
+
+/* Form elements */
+.field{margin-bottom:14px}
+.field label{display:block;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--dim);margin-bottom:6px}
+.field input,.field select,.field textarea{width:100%;background:#1a1510;border:1px solid var(--border);border-radius:4px;color:var(--text);padding:8px 12px;font-size:14px;font-family:inherit;outline:none;transition:border-color 0.2s}
+.field input:focus,.field select,.field textarea:focus{border-color:rgba(232,193,112,0.4)}
+.field select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%235a5040'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center}
+.field textarea{resize:vertical;min-height:70px;line-height:1.5}
+.field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.field-row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.field-hint{font-size:10px;color:var(--dim);margin-top:4px;letter-spacing:0.5px}
+
+/* Ability score grid */
+.ability-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+.ability-box{background:#1a1510;border:1px solid var(--border);border-radius:6px;padding:10px 8px;text-align:center}
+.ability-label{font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--dim);margin-bottom:6px}
+.ability-input{width:100%;background:transparent;border:none;color:var(--gold);font-size:22px;font-weight:700;font-family:inherit;text-align:center;outline:none}
+.ability-mod{font-size:11px;color:var(--dim);margin-top:4px}
+.ability-asi{font-size:10px;color:var(--green);margin-top:2px}
+
+/* Skills grid */
+.skills-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.skill-row{display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:4px;cursor:pointer;transition:background 0.15s}
+.skill-row:hover{background:rgba(255,255,255,0.03)}
+.skill-row.locked{opacity:0.5;cursor:default}
+.skill-check{width:14px;height:14px;border-radius:3px;border:1px solid var(--dim2);background:transparent;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:9px;color:var(--gold)}
+.skill-check.checked{background:rgba(232,193,112,0.15);border-color:rgba(232,193,112,0.4)}
+.skill-check.expertise{background:rgba(64,204,128,0.15);border-color:rgba(64,204,128,0.4);color:var(--green)}
+.skill-name{font-size:12px;flex:1}
+.skill-ability{font-size:9px;color:var(--dim);letter-spacing:1px;text-transform:uppercase}
+.skill-bonus{font-size:11px;color:var(--gold);min-width:28px;text-align:right}
+
+/* Spell picker */
+.spell-search{margin-bottom:10px}
+.spell-list{max-height:320px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;border:1px solid var(--border);border-radius:6px;padding:8px;background:#0f0d0a}
+.spell-item{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:4px;cursor:pointer;transition:background 0.15s}
+.spell-item:hover{background:rgba(255,255,255,0.04)}
+.spell-item.selected{background:rgba(232,193,112,0.08)}
+.spell-item-check{width:14px;height:14px;border-radius:50%;border:1px solid var(--dim2);flex-shrink:0}
+.spell-item.selected .spell-item-check{background:rgba(232,193,112,0.3);border-color:rgba(232,193,112,0.6)}
+.spell-item-name{font-size:12px;flex:1}
+.spell-item-meta{font-size:10px;color:var(--dim);letter-spacing:0.5px}
+.spell-level-header{font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--dim2);padding:6px 8px 2px;border-top:1px solid var(--dim2);margin-top:4px}
+.spell-level-header:first-child{border-top:none;margin-top:0}
+.spell-count{font-size:11px;color:var(--dim);margin-top:6px}
+
+/* Feat picker */
+.feat-list{max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;border:1px solid var(--border);border-radius:6px;padding:8px;background:#0f0d0a}
+.feat-item{display:flex;align-items:flex-start;gap:8px;padding:6px 8px;border-radius:4px;cursor:pointer;transition:background 0.15s}
+.feat-item:hover{background:rgba(255,255,255,0.04)}
+.feat-item.selected{background:rgba(152,96,204,0.08)}
+.feat-item-check{width:14px;height:14px;border-radius:3px;border:1px solid var(--dim2);flex-shrink:0;margin-top:2px}
+.feat-item.selected .feat-item-check{background:rgba(152,96,204,0.3);border-color:rgba(152,96,204,0.6)}
+.feat-item-name{font-size:12px;flex:1}
+.feat-prereq{font-size:10px;color:var(--dim);margin-top:2px}
+
+/* Stat preview */
+.stat-preview{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+.stat-preview-box{background:#1a1510;border:1px solid var(--border);border-radius:6px;padding:8px;text-align:center}
+.stat-preview-val{font-size:18px;font-weight:700;color:var(--gold)}
+.stat-preview-lbl{font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--dim);margin-top:3px}
+.stat-override-row{display:flex;align-items:center;gap:6px;margin-top:6px}
+.stat-override-row label{font-size:10px;color:var(--dim);flex:1}
+.stat-override-row input{width:70px;background:#1a1510;border:1px solid var(--border);border-radius:4px;color:var(--text);padding:4px 8px;font-size:12px;font-family:inherit;outline:none;text-align:center}
+
+/* HP calc display */
+.hp-calc{padding:10px 12px;background:rgba(232,193,112,0.04);border:1px solid rgba(232,193,112,0.15);border-radius:6px;font-size:11px;color:var(--dim);line-height:1.8}
+.hp-calc strong{color:var(--gold)}
+
+/* Nav buttons */
+.nav-row{display:flex;justify-content:space-between;align-items:center;margin-top:20px}
+.btn{padding:8px 20px;border-radius:4px;font-size:13px;font-family:inherit;cursor:pointer;transition:all 0.2s;white-space:nowrap;letter-spacing:0.5px;border:1px solid}
+.btn-gold{background:rgba(232,193,112,0.1);border-color:rgba(232,193,112,0.35);color:var(--gold)}
+.btn-gold:hover{background:rgba(232,193,112,0.2)}
+.btn-gold:disabled{opacity:0.35;cursor:default}
+.btn-dim{background:transparent;border-color:var(--border);color:var(--dim)}
+.btn-green{background:rgba(64,204,128,0.1);border-color:rgba(64,204,128,0.3);color:var(--green)}
+.btn-green:hover{background:rgba(64,204,128,0.18)}
+.btn-green:disabled{opacity:0.35;cursor:default}
+
+/* Traits info panel */
+.traits-panel{background:#0f0d0a;border:1px solid var(--dim2);border-radius:6px;padding:12px;margin-top:10px;font-size:11px;line-height:1.7;color:var(--dim);max-height:160px;overflow-y:auto}
+.traits-panel strong{color:var(--text)}
+
+/* Slot budget indicator */
+.slot-budget{display:flex;align-items:center;gap:6px;margin-bottom:8px;font-size:11px;color:var(--dim)}
+.slot-budget strong{color:var(--gold)}
+
+.hidden{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="page-header">
+  <a href="/" class="back-link">← Roster</a>
+  <div class="page-title">New Character</div>
+</div>
+
+<!-- Step progress bar -->
+<div class="steps" id="stepDots"></div>
+<div class="step-label" id="stepLabel"></div>
+<div class="step-tabs" id="stepTabs"></div>
+
+<!-- Step containers -->
+<div id="step1"></div>
+<div id="step2" class="hidden"></div>
+<div id="step3" class="hidden"></div>
+<div id="step4" class="hidden"></div>
+<div id="step5" class="hidden"></div>
+
+<div class="nav-row">
+  <button class="btn btn-green" id="saveEditBtn" onclick="saveEdit()">Create Character</button>
+</div>
+
+</div>
+
+<script src="/js/shared.js"></script>
+<script>
+// ── State ────────────────────────────────────────────────────────
+let step = 1;
+const TOTAL_STEPS = 5;
+const STEP_LABELS = ['Identity', 'Class & Level', 'Ability Scores', 'Skills, Feats & Spells', 'HP & Review'];
+const urlParams = new URLSearchParams(location.search);
+const editId = parseInt(urlParams.get('edit')) || null;
+const requestedStep = Math.max(1, Math.min(TOTAL_STEPS, parseInt(urlParams.get('step')) || 1));
+const isEditMode = !!editId;
+
+// Form data accumulated across steps
+const F = {
+  // Step 1
+  name: '', race_id: null, background_id: null, alignment: '',
+  personality_traits: '', ideals: '', bonds: '', flaws: '', appearance: '',
+  // Step 2
+  class_id: null, subclass_id: null, level: 1, experience_points: 0,
+  // Step 3
+  ability_scores: {str:10,dex:10,con:10,int:10,wis:10,cha:10},
+  stat_overrides: {},
+  race_asi_mode: 'plus2plus1',
+  race_asi_choices: {},
+  proficiency_choices: { skill: {}, language: {}, tool: {} },
+  language_proficiencies: [],
+  tool_proficiencies: [],
+  // Step 4
+  skill_proficiencies: {}, feats: [], spells_known: [], spellbook: [],
+  // Step 5
+  hp_max: null, armor_type: 'unarmored',
+};
+
+// Cached game data
+let allClasses = [], allRaces = [], allBackgrounds = [];
+let currentClass = null, currentClassProgression = [], currentSubclasses = [];
+let currentSpells = [], currentFeats = [];
+let raceData = null, bgData = null;
+
+const STANDARD_LANGUAGES = ['common','dwarvish','elvish','giant','gnomish','goblin','halfling','orc'];
+const EXOTIC_LANGUAGES = ['abyssal','celestial','draconic','deep speech','infernal','primordial','sylvan','undercommon'];
+
+// ── Init ──────────────────────────────────────────────────────────
+async function init() {
+  [allClasses, allRaces, allBackgrounds, currentFeats] = await Promise.all([
+    API.get('/classes'), API.get('/races'), API.get('/backgrounds'), API.get('/feats'),
+  ]);
+
+  if (isEditMode) {
+    await loadEditCharacter();
+    step = requestedStep;
+    const title = document.querySelector('.page-title');
+    if (title) title.textContent = 'Edit Character';
+    const back = document.querySelector('.back-link');
+    if (back) {
+      back.href = `/sheet.html?id=${editId}`;
+      back.textContent = '← Cancel';
+    }
+  }
+
+  renderStep();
+}
+
+async function loadEditCharacter() {
+  const c = await API.get(`/characters/${editId}`);
+  F.name = c.name || '';
+  F.race_id = c.race_id || null;
+  F.background_id = c.background_id || null;
+  F.alignment = c.alignment || '';
+  F.personality_traits = c.personality_traits || '';
+  F.ideals = c.ideals || '';
+  F.bonds = c.bonds || '';
+  F.flaws = c.flaws || '';
+  F.appearance = c.appearance || '';
+  F.class_id = c.class_id || null;
+  F.subclass_id = c.subclass_id || null;
+  F.level = parseInt(c.level) || 1;
+  F.experience_points = parseInt(c.experience_points) || 0;
+  F.ability_scores = c.ability_scores || F.ability_scores;
+  F.stat_overrides = c.stat_overrides || {};
+  F.race_asi_mode = c.stat_overrides?.race_asi_mode || 'plus2plus1';
+  F.race_asi_choices = c.stat_overrides?.race_asi_choices || {};
+  F.proficiency_choices = c.stat_overrides?.proficiency_choices || { skill: {}, language: {}, tool: {} };
+  F.language_proficiencies = c.stat_overrides?.languages || [];
+  F.tool_proficiencies = c.stat_overrides?.tools || [];
+  F.skill_proficiencies = c.skill_proficiencies || {};
+  F.feats = c.feats || [];
+  F.spells_known = c.spells_known || [];
+  F.spellbook = c.spellbook || [];
+  F.hp_max = c.stat_overrides?.hp_max || null;
+
+  if (F.class_id) {
+    currentClass = await API.get(`/classes/${F.class_id}`);
+    currentSubclasses = currentClass.subclasses || [];
+    currentClassProgression = await API.get(`/classes/${F.class_id}/progression`);
+    if (currentClass.spellcasting_ability) {
+      const subQ = F.subclass_id ? `&subclass_id=${F.subclass_id}` : '';
+      currentSpells = await API.get(`/spells?class=${encodeURIComponent((currentClass.name || '').toLowerCase())}&level=0-9${subQ}`);
+    }
+  }
+
+  if (F.race_id) {
+    raceData = await API.get(`/races/${F.race_id}`).catch(() => null);
+  }
+  if (F.background_id) {
+    bgData = await API.get(`/backgrounds/${F.background_id}`).catch(() => null);
+  }
+
+  // Builder fields store base scores; sheet stores final scores.
+  if (raceData && c.stat_overrides?.race_asi_applied) {
+    const racialAsi = getRacialAsiBonuses();
+    for (const ab of ['str', 'dex', 'con', 'int', 'wis', 'cha']) {
+      F.ability_scores[ab] = Math.max(1, (F.ability_scores[ab] || 10) - (racialAsi[ab] || 0));
+    }
+  }
+}
+
+// ── Navigation ─────────────────────────────────────────────────────
+function nextStep() {
+  if (!validateStep()) return;
+  if (step < TOTAL_STEPS) { step++; renderStep(); }
+  else submit();
+}
+function prevStep() {
+  if (step > 1) { step--; renderStep(); }
+}
+
+function renderStep() {
+  // Update dots
+  const dots = document.getElementById('stepDots');
+  dots.innerHTML = Array.from({length: TOTAL_STEPS}, (_,i) => {
+    const cls = `${i + 1 < step ? 'done' : i + 1 === step ? 'active' : ''}`;
+    return `<button type="button" class="step-dot ${cls}" onclick="goToStep(${i + 1})" title="Go to ${STEP_LABELS[i]}"></button>`;
+  }).join('');
+  document.getElementById('stepLabel').textContent = `Step ${step} of ${TOTAL_STEPS} — ${STEP_LABELS[step-1]}`;
+  const tabs = document.getElementById('stepTabs');
+  tabs.innerHTML = STEP_LABELS.map((label, i) =>
+    `<button type="button" class="step-tab ${i + 1 === step ? 'active' : ''}" onclick="goToStep(${i + 1})">${label}</button>`
+  ).join('');
+
+  // Hide all steps
+  for (let i = 1; i <= TOTAL_STEPS; i++) {
+    document.getElementById(`step${i}`).classList.add('hidden');
+  }
+  document.getElementById(`step${step}`).classList.remove('hidden');
+
+  // Prev/next labels
+  const saveBtn = document.getElementById('saveEditBtn');
+  saveBtn.textContent = isEditMode ? 'Save Changes' : 'Create Character';
+  saveBtn.className = `btn ${isEditMode ? 'btn-green' : 'btn-gold'}`;
+
+  // Render the step content
+  const renderers = [renderStep1, renderStep2, renderStep3, renderStep4, renderStep5];
+  renderers[step-1]();
+}
+
+function goToStep(target) {
+  if (target < 1 || target > TOTAL_STEPS) return;
+  step = target;
+  renderStep();
+}
+
+function saveEdit() {
+  submit();
+}
+
+function validateStep() {
+  if (step === 1 && !F.name.trim()) { toast('Character name is required.', 'error'); return false; }
+  if (step === 2 && !F.class_id) { toast('Please select a class.', 'error'); return false; }
+  return true;
+}
+
+// ── Step 1: Identity ───────────────────────────────────────────────
+function renderStep1() {
+  const el = document.getElementById('step1');
+
+  const raceOptions = allRaces.map(r =>
+    `<option value="${r.id}" ${r.id === F.race_id ? 'selected' : ''}>${r.name} (${r.source})</option>`
+  ).join('');
+
+  const bgOptions = allBackgrounds.map(b =>
+    `<option value="${b.id}" ${b.id === F.background_id ? 'selected' : ''}>${b.name} (${b.source})</option>`
+  ).join('');
+
+  const alignOptions = ALIGNMENTS.map(a =>
+    `<option value="${a}" ${a === F.alignment ? 'selected' : ''}>${a}</option>`
+  ).join('');
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-title">Character Identity</div>
+      <div class="field">
+        <label>Character Name</label>
+        <input type="text" id="f_name" value="${F.name}" placeholder="e.g. Valen, Mira..." oninput="F.name=this.value">
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Race / Lineage</label>
+          <select id="f_race" onchange="onRaceChange(this.value)">
+            <option value="">— Select race —</option>
+            ${raceOptions}
+          </select>
+        </div>
+        <div class="field">
+          <label>Alignment</label>
+          <select id="f_align" onchange="F.alignment=this.value">
+            <option value="">— Select —</option>
+            ${alignOptions}
+          </select>
+        </div>
+      </div>
+      <div id="raceTraits" class="${F.race_id ? '' : 'hidden'}"></div>
+      <div class="field">
+        <label>Background</label>
+        <select id="f_bg" onchange="onBgChange(this.value)">
+          <option value="">— Select background —</option>
+          ${bgOptions}
+        </select>
+      </div>
+      <div id="bgTraits" class="${F.background_id ? '' : 'hidden'}"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Character Description</div>
+      <div class="field">
+        <label>Appearance</label>
+        <textarea id="f_appearance" placeholder="Physical description..." oninput="F.appearance=this.value">${F.appearance}</textarea>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Personality Traits</label>
+          <textarea id="f_pt" placeholder="How do you act?" oninput="F.personality_traits=this.value">${F.personality_traits}</textarea>
+        </div>
+        <div class="field">
+          <label>Ideals</label>
+          <textarea id="f_ideals" placeholder="What do you believe?" oninput="F.ideals=this.value">${F.ideals}</textarea>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Bonds</label>
+          <textarea id="f_bonds" placeholder="Who do you care about?" oninput="F.bonds=this.value">${F.bonds}</textarea>
+        </div>
+        <div class="field">
+          <label>Flaws</label>
+          <textarea id="f_flaws" placeholder="What holds you back?" oninput="F.flaws=this.value">${F.flaws}</textarea>
+        </div>
+      </div>
+    </div>
+  `;
+
+  if (F.race_id) onRaceChange(F.race_id, false);
+  if (F.background_id) onBgChange(F.background_id, false);
+}
+
+async function onRaceChange(id, updateF = true) {
+  if (updateF) F.race_id = id ? parseInt(id) : null;
+  const panel = document.getElementById('raceTraits');
+  if (!id) { panel.classList.add('hidden'); return; }
+  try {
+    raceData = await API.get(`/races/${id}`);
+    if (updateF) {
+      F.race_asi_choices = {};
+      F.race_asi_mode = 'plus2plus1';
+    }
+    const traits = (raceData.data?.entries || [])
+      .filter(e => typeof e === 'object' && e.name)
+      .map(e => `<div><strong>${e.name}</strong>: ${(e.entries||[]).join(' ').slice(0,120)}...</div>`)
+      .join('');
+    const asi = getRacialAsiSummary();
+    panel.innerHTML = `<div class="traits-panel"><strong>ASI:</strong> ${asi} · <strong>Speed:</strong> ${raceData.speed?.walk ?? 30}ft${raceData.darkvision ? ` · <strong>Darkvision</strong> ${raceData.darkvision}ft` : ''}<br>${traits}</div>`;
+    panel.classList.remove('hidden');
+  } catch(e) { panel.classList.add('hidden'); }
+}
+
+async function onBgChange(id, updateF = true) {
+  if (updateF) F.background_id = id ? parseInt(id) : null;
+  const panel = document.getElementById('bgTraits');
+  if (!id) { panel.classList.add('hidden'); return; }
+  try {
+    bgData = await API.get(`/backgrounds/${id}`);
+    const skills = bgData.skill_proficiencies
+      ?.flatMap(obj => Object.entries(obj).filter(([,v])=>v===true).map(([k])=>k))
+      .map(s=>s.charAt(0).toUpperCase()+s.slice(1)).join(', ') || 'None';
+    panel.innerHTML = `<div class="traits-panel"><strong>Skills:</strong> ${skills}</div>`;
+    panel.classList.remove('hidden');
+  } catch(e) { panel.classList.add('hidden'); }
+}
+
+function normalizeSkillKey(k) {
+  return String(k || '').toLowerCase().replace(/\s+/g, '_');
+}
+
+function normalizeToken(k) {
+  return String(k || '').toLowerCase().trim();
+}
+
+function parseProficiencySpec(specList, kind, prefix) {
+  const fixed = [];
+  const choiceGroups = [];
+  const list = Array.isArray(specList) ? specList : [];
+
+  for (const obj of list) {
+    if (!obj || typeof obj !== 'object') continue;
+    for (const [rawKey, val] of Object.entries(obj)) {
+      const key = normalizeToken(rawKey);
+      if (key === 'choose' || key === 'any' || key === 'anystandard' || key === 'anyexotic') continue;
+      if (val === true || val === 1) {
+        fixed.push(kind === 'skill' ? normalizeSkillKey(key) : key);
+      }
+    }
+
+    if (kind === 'language' && obj.anyStandard && obj.choose && Array.isArray(obj.choose.from)) {
+      const requiredFrom = obj.choose.from.map(v => normalizeToken(v));
+      const requiredCount = parseInt(obj.choose.count, 10) || 1;
+      const freeCount = parseInt(obj.anyStandard, 10) || 1;
+      const all = [...new Set([...STANDARD_LANGUAGES, ...EXOTIC_LANGUAGES, ...requiredFrom])];
+      for (let i = 0; i < requiredCount; i++) {
+        choiceGroups.push({ id: `${prefix}_req_${choiceGroups.length}`, from: requiredFrom, count: 1, amount: 1 });
+      }
+      for (let i = 0; i < freeCount; i++) {
+        choiceGroups.push({ id: `${prefix}_free_${choiceGroups.length}`, from: all, count: 1, amount: 1 });
+      }
+      continue;
+    }
+
+    if (obj.anyStandard) {
+      const count = parseInt(obj.anyStandard, 10) || 1;
+      for (let i = 0; i < count; i++) {
+        choiceGroups.push({ id: `${prefix}_std_${choiceGroups.length}`, from: STANDARD_LANGUAGES.slice(), count: 1, amount: 1 });
+      }
+    }
+    if (obj.anyExotic) {
+      const count = parseInt(obj.anyExotic, 10) || 1;
+      for (let i = 0; i < count; i++) {
+        choiceGroups.push({ id: `${prefix}_exo_${choiceGroups.length}`, from: EXOTIC_LANGUAGES.slice(), count: 1, amount: 1 });
+      }
+    }
+    if (obj.any) {
+      const count = parseInt(obj.any, 10) || 1;
+      const all = [...STANDARD_LANGUAGES, ...EXOTIC_LANGUAGES];
+      for (let i = 0; i < count; i++) {
+        choiceGroups.push({ id: `${prefix}_any_${choiceGroups.length}`, from: all, count: 1, amount: 1 });
+      }
+    }
+
+    if (obj.choose) {
+      const from = Array.isArray(obj.choose.from)
+        ? obj.choose.from.map(v => kind === 'skill' ? normalizeSkillKey(v) : normalizeToken(v))
+        : [];
+      const count = parseInt(obj.choose.count, 10) || 1;
+      for (let i = 0; i < count; i++) {
+        choiceGroups.push({ id: `${prefix}_ch_${choiceGroups.length}`, from, count: 1, amount: 1 });
+      }
+    }
+  }
+
+  return { fixed: [...new Set(fixed)], choiceGroups };
+}
+
+function getAllSkillGrantConfig() {
+  const bg = parseProficiencySpec(bgData?.skill_proficiencies || [], 'skill', 'bg_skill');
+  const race = parseProficiencySpec(raceData?.data?.skillProficiencies || [], 'skill', 'race_skill');
+  return {
+    fixed: [...new Set([...bg.fixed, ...race.fixed])],
+    choices: [...bg.choiceGroups, ...race.choiceGroups],
+  };
+}
+
+function getAllLanguageGrantConfig() {
+  const bg = parseProficiencySpec(bgData?.language_proficiencies || [], 'language', 'bg_lang');
+  const race = parseProficiencySpec(raceData?.data?.languageProficiencies || [], 'language', 'race_lang');
+  return {
+    fixed: [...new Set([...bg.fixed, ...race.fixed])],
+    choices: [...bg.choiceGroups, ...race.choiceGroups],
+  };
+}
+
+function getAllToolGrantConfig() {
+  const bg = parseProficiencySpec(bgData?.tool_proficiencies || [], 'tool', 'bg_tool');
+  const race = parseProficiencySpec(raceData?.data?.toolProficiencies || [], 'tool', 'race_tool');
+  return {
+    fixed: [...new Set([...bg.fixed, ...race.fixed])],
+    choices: [...bg.choiceGroups, ...race.choiceGroups],
+  };
+}
+
+function computeSelectedFromChoices(kind, config) {
+  const out = [];
+  for (const group of (config?.choices || [])) {
+    const pick = F.proficiency_choices?.[kind]?.[group.id];
+    if (pick && group.from.includes(pick)) out.push(pick);
+  }
+  return [...new Set(out)];
+}
+
+function getAllGrantedSkills() {
+  const cfg = getAllSkillGrantConfig();
+  return [...new Set([...cfg.fixed, ...computeSelectedFromChoices('skill', cfg)])];
+}
+
+function setProficiencyChoice(kind, groupId, value) {
+  F.proficiency_choices = F.proficiency_choices || { skill: {}, language: {}, tool: {} };
+  const existing = F.proficiency_choices[kind] || {};
+  if (value) {
+    const duplicate = Object.entries(existing).find(([gid, picked]) => gid !== groupId && picked === value);
+    if (duplicate) {
+      toast('That proficiency is already selected. Choose a different one.', 'warn');
+      value = '';
+    }
+  }
+  F.proficiency_choices[kind][groupId] = value || '';
+  if (kind === 'skill') {
+    renderSkillsGrid(getClassSkillOptions(currentClass?.name), getAllGrantedSkills(), getClassSkillCount(currentClass?.name));
+  }
+  renderProficiencyChoosers();
+  updateDerivedProficiencies();
+}
+
+function updateDerivedProficiencies() {
+  const langCfg = getAllLanguageGrantConfig();
+  const toolCfg = getAllToolGrantConfig();
+  F.language_proficiencies = [...new Set([...langCfg.fixed, ...computeSelectedFromChoices('language', langCfg)])];
+  F.tool_proficiencies = [...new Set([...toolCfg.fixed, ...computeSelectedFromChoices('tool', toolCfg)])];
+}
+
+function renderProficiencyChoosers() {
+  const root = document.getElementById('proficiencyChoices');
+  if (!root) return;
+  const skillCfg = getAllSkillGrantConfig();
+  const langCfg = getAllLanguageGrantConfig();
+  const toolCfg = getAllToolGrantConfig();
+
+  const renderGroup = (kind, group) => {
+    const current = F.proficiency_choices?.[kind]?.[group.id] || '';
+    const used = new Set(Object.entries(F.proficiency_choices?.[kind] || {})
+      .filter(([gid]) => gid !== group.id)
+      .map(([, picked]) => picked)
+      .filter(Boolean));
+    return `<div class="field" style="margin-bottom:8px"><label>${kind === 'skill' ? 'Skill' : kind === 'language' ? 'Language' : 'Tool'} Choice</label><select onchange="setProficiencyChoice('${kind}','${group.id}',this.value)"><option value="">— Select —</option>${group.from.map(v => `<option value="${v}" ${current === v ? 'selected' : ''} ${used.has(v) ? 'disabled' : ''}>${(kind==='skill' ? (SKILLS.find(s => s.key===v)?.name || v) : v).replace(/\b\w/g,c=>c.toUpperCase())}</option>`).join('')}</select></div>`;
+  };
+
+  let html = '';
+  if (skillCfg.choices.length || langCfg.choices.length || toolCfg.choices.length) {
+    html += `<div class="card"><div class="card-title">Race & Background Proficiency Choices</div>`;
+    html += skillCfg.choices.map(g => renderGroup('skill', g)).join('');
+    html += langCfg.choices.map(g => renderGroup('language', g)).join('');
+    html += toolCfg.choices.map(g => renderGroup('tool', g)).join('');
+    html += `</div>`;
+  }
+  root.innerHTML = html;
+  updateDerivedProficiencies();
+}
+
+function getRaceAsiConfig() {
+  const fixed = {};
+  const choiceGroups = [];
+  const allAbilities = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
+  const abilityList = Array.isArray(raceData?.ability) ? raceData.ability : [];
+
+  for (const obj of abilityList) {
+    if (!obj || typeof obj !== 'object') continue;
+    for (const [k, v] of Object.entries(obj)) {
+      if (k === 'choose') continue;
+      fixed[k] = (fixed[k] || 0) + (parseInt(v, 10) || 0);
+    }
+    if (obj.choose) {
+      const from = Array.isArray(obj.choose.from) ? obj.choose.from.slice() : allAbilities.slice();
+      const count = parseInt(obj.choose.count, 10) || 1;
+      const amount = parseInt(obj.choose.amount, 10) || 1;
+      choiceGroups.push({ id: `race_choose_${choiceGroups.length}`, from, count, amount });
+    }
+  }
+
+  if (!abilityList.length && raceData?.data?.lineage) {
+    if (F.race_asi_mode === 'threeplus1') {
+      for (let i = 0; i < 3; i++) {
+        choiceGroups.push({ id: `lineage_three_${i}`, from: allAbilities.slice(), count: 1, amount: 1 });
+      }
+    } else {
+      choiceGroups.push({ id: 'lineage_plus2', from: allAbilities.slice(), count: 1, amount: 2 });
+      choiceGroups.push({ id: 'lineage_plus1', from: allAbilities.slice(), count: 1, amount: 1 });
+    }
+  }
+
+  return { fixed, choiceGroups };
+}
+
+function getRacialAsiBonuses() {
+  const { fixed, choiceGroups } = getRaceAsiConfig();
+  const out = { ...fixed };
+  const taken = new Set();
+  for (const group of choiceGroups) {
+    const picks = Array.isArray(F.race_asi_choices[group.id]) ? F.race_asi_choices[group.id] : [];
+    for (let i = 0; i < Math.min(group.count, picks.length); i++) {
+      const ab = picks[i];
+      if (!group.from.includes(ab)) continue;
+      if ((group.id.startsWith('lineage_') || group.id.startsWith('race_choose_')) && taken.has(ab)) continue;
+      taken.add(ab);
+      out[ab] = (out[ab] || 0) + group.amount;
+    }
+  }
+  return out;
+}
+
+function getRacialAsiSummary() {
+  const { fixed, choiceGroups } = getRaceAsiConfig();
+  const parts = [];
+  for (const [ab, val] of Object.entries(fixed)) {
+    if (val) parts.push(`${ab.toUpperCase()} +${val}`);
+  }
+  if (choiceGroups.length) {
+    const desc = choiceGroups.map(g => `${g.count}x +${g.amount} from ${g.from.map(a => a.toUpperCase()).join('/')}`).join('; ');
+    parts.push(desc);
+  }
+  return parts.length ? parts.join(', ') : 'None';
+}
+
+function setRaceAsiMode(mode) {
+  F.race_asi_mode = mode;
+  F.race_asi_choices = {};
+  renderStep3();
+}
+
+function setRaceAsiChoice(groupId, slotIndex, value) {
+  if (!F.race_asi_choices[groupId]) F.race_asi_choices[groupId] = [];
+  F.race_asi_choices[groupId][slotIndex] = value;
+  updateStep3Derived();
+}
+
+function renderRacialAsiChooser() {
+  const root = document.getElementById('racialAsiChooser');
+  if (!root) return;
+  const { choiceGroups } = getRaceAsiConfig();
+  const isLineage = !Array.isArray(raceData?.ability) || raceData.ability.length === 0;
+  if (!choiceGroups.length) {
+    root.innerHTML = '';
+    return;
+  }
+
+  let html = `<div class="field" style="margin-top:10px"><label>Racial Ability Choices</label>`;
+  if (isLineage && raceData?.data?.lineage) {
+    html += `
+      <div class="field-row" style="margin-bottom:8px">
+        <button type="button" class="btn ${F.race_asi_mode === 'plus2plus1' ? 'btn-gold' : 'btn-dim'}" onclick="setRaceAsiMode('plus2plus1')">+2 and +1</button>
+        <button type="button" class="btn ${F.race_asi_mode === 'threeplus1' ? 'btn-gold' : 'btn-dim'}" onclick="setRaceAsiMode('threeplus1')">Three +1s</button>
+      </div>
+    `;
+  }
+
+  for (const group of choiceGroups) {
+    for (let i = 0; i < group.count; i++) {
+      const current = (F.race_asi_choices[group.id] || [])[i] || '';
+      html += `
+        <div class="field" style="margin-bottom:8px">
+          <label>Pick +${group.amount} (${i + 1}/${group.count})</label>
+          <select onchange="setRaceAsiChoice('${group.id}',${i},this.value)">
+            <option value="">— Select ability —</option>
+            ${group.from.map(ab => `<option value="${ab}" ${current === ab ? 'selected' : ''}>${ABILITY_NAMES[ab]}</option>`).join('')}
+          </select>
+        </div>
+      `;
+    }
+  }
+  html += '</div>';
+  root.innerHTML = html;
+}
+
+// ── Step 2: Class & Level ──────────────────────────────────────────
+async function renderStep2() {
+  const el = document.getElementById('step2');
+
+  const classOptions = allClasses.map(c =>
+    `<option value="${c.id}" ${c.id === F.class_id ? 'selected' : ''}>${c.name} (${c.source}) — d${c.hit_die}</option>`
+  ).join('');
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-title">Class</div>
+      <div class="field">
+        <label>Class</label>
+        <select id="f_class" onchange="onClassChange(this.value)">
+          <option value="">— Select class —</option>
+          ${classOptions}
+        </select>
+      </div>
+      <div id="subclassField" class="field hidden">
+        <label>Subclass / Patron / <span id="subclassTitle">Subclass</span></label>
+        <select id="f_subclass" onchange="F.subclass_id=this.value?parseInt(this.value):null">
+          <option value="">— Select subclass —</option>
+        </select>
+        <div class="field-hint" id="subclassHint"></div>
+      </div>
+      <div id="classInfo" class="traits-panel hidden" style="margin-top:10px"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Level & Experience</div>
+      <div class="field-row">
+        <div class="field">
+          <label>Current Level</label>
+          <select id="f_level" onchange="F.level=parseInt(this.value);updateStep2Preview()">
+            ${Array.from({length:20},(_,i)=>`<option value="${i+1}" ${i+1===F.level?'selected':''}>${i+1}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>Experience Points</label>
+          <input type="number" id="f_xp" min="0" value="${F.experience_points}" oninput="F.experience_points=parseInt(this.value)||0">
+        </div>
+      </div>
+      <div id="step2Preview" style="margin-top:10px"></div>
+    </div>
+  `;
+
+  if (F.class_id) await onClassChange(F.class_id, false);
+  updateStep2Preview();
+}
+
+async function onClassChange(id, updateF = true) {
+  if (updateF) {
+    F.class_id = id ? parseInt(id) : null;
+    F.subclass_id = null;
+  }
+  if (!id) {
+    document.getElementById('subclassField').classList.add('hidden');
+    document.getElementById('classInfo').classList.add('hidden');
+    return;
+  }
+  try {
+    currentClass = await API.get(`/classes/${id}`);
+    currentSubclasses = currentClass.subclasses || [];
+    currentClassProgression = await API.get(`/classes/${id}/progression`);
+
+    // Show subclass selector if there are subclasses
+    const subFld = document.getElementById('subclassField');
+    if (currentSubclasses.length) {
+      const subTitle = currentClass.data?.subclassTitle || 'Subclass';
+      document.getElementById('subclassTitle').textContent = subTitle;
+      // Determine when subclass is gained (varies by class)
+      const subGainLevel = getSubclassGainLevel(currentClass.name);
+      document.getElementById('subclassHint').textContent =
+        F.level >= subGainLevel ? '' : `Gained at level ${subGainLevel}`;
+
+      const subOpts = currentSubclasses.map(s =>
+        `<option value="${s.id}" ${s.id === F.subclass_id ? 'selected' : ''}>${s.name} (${s.source})</option>`
+      ).join('');
+      document.getElementById('f_subclass').innerHTML =
+        `<option value="">— Select ${subTitle} —</option>${subOpts}`;
+      subFld.classList.remove('hidden');
+    } else {
+      subFld.classList.add('hidden');
+    }
+
+    // Class info panel
+    const info = document.getElementById('classInfo');
+    const saves = currentClass.save_proficiencies?.map(s => s.toUpperCase()).join(', ') || '—';
+    const casterInfo = currentClass.caster_progression
+      ? ` · <strong>Casting:</strong> ${currentClass.caster_progression}${currentClass.spellcasting_ability ? ` (${currentClass.spellcasting_ability.toUpperCase()})` : ''}`
+      : ' · No spellcasting';
+    info.innerHTML = `<strong>Hit Die:</strong> d${currentClass.hit_die} · <strong>Saves:</strong> ${saves}${casterInfo}`;
+    info.classList.remove('hidden');
+
+    updateStep2Preview();
+  } catch(e) {
+    toast('Failed to load class data.', 'error');
+  }
+}
+
+function getSubclassGainLevel(className) {
+  const name = className?.toLowerCase() || '';
+  if (name === 'warlock') return 1;
+  if (name === 'barbarian') return 3;
+  if (['fighter','rogue'].includes(name)) return 3;
+  if (['bard','druid','cleric','sorcerer','wizard','ranger','monk'].includes(name)) return 2;
+  if (name === 'paladin') return 3;
+  return 3; // default
+}
+
+function updateStep2Preview() {
+  const preview = document.getElementById('step2Preview');
+  if (!preview || !currentClassProgression.length) return;
+  const lvl = F.level;
+  const row = currentClassProgression.find(r => r.level === lvl);
+  if (!row) return;
+
+  let html = `<div class="hp-calc"><strong>Level ${lvl}</strong> · Proficiency Bonus: <strong>+${row.proficiency_bonus}</strong>`;
+  if (row.spell_slots) {
+    const slots = row.spell_slots;
+    if (currentClass?.caster_progression === 'pact') {
+      const pactSlots = slots.findIndex(n => n > 0);
+      if (pactSlots >= 0) {
+        html += ` · Pact Magic: <strong>${slots[pactSlots]} × ${ordinal(pactSlots+1)}-level slots</strong>`;
+      }
+    } else {
+      const slotStr = slots.map((n,i) => n > 0 ? `${n}×L${i+1}` : null).filter(Boolean).join(', ');
+      if (slotStr) html += ` · Spell Slots: <strong>${slotStr}</strong>`;
+    }
+  }
+  if (row.cantrips_known != null) html += ` · Cantrips: <strong>${row.cantrips_known}</strong>`;
+  if (row.spells_known != null) html += ` · Spells Known: <strong>${row.spells_known}</strong>`;
+  html += `</div>`;
+  preview.innerHTML = html;
+}
+
+// ── Step 3: Ability Scores ─────────────────────────────────────────
+function renderStep3() {
+  const el = document.getElementById('step3');
+  const racialAsi = getRacialAsiBonuses();
+
+  const abilities = ['str','dex','con','int','wis','cha'];
+  const abilityBoxes = abilities.map(ab => {
+    const base = F.ability_scores[ab];
+    const mod = abilityMod(base + (racialAsi[ab] || 0));
+    const asiStr = racialAsi[ab] ? `+${racialAsi[ab]} racial` : '';
+    return `
+      <div class="ability-box">
+        <div class="ability-label">${ABILITY_NAMES[ab]}</div>
+        <input class="ability-input" type="number" min="1" max="20" value="${base}"
+          oninput="F.ability_scores['${ab}']=parseInt(this.value)||10;updateStep3Derived()">
+        <div class="ability-mod" id="mod_${ab}">${modStr(mod)}</div>
+        ${asiStr ? `<div class="ability-asi">${asiStr}</div>` : ''}
+      </div>
+    `;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-title">Ability Scores (Base values)</div>
+      <div class="ability-grid">${abilityBoxes}</div>
+      <div id="racialAsiChooser"></div>
+      <div id="derivedStats"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Override Calculated Stats</div>
+      <div class="field-hint" style="margin-bottom:10px">Auto-calculated values shown above. Enter a number to override any stat.</div>
+      <div class="field-row">
+        <div class="field">
+          <label>AC Override</label>
+          <input type="number" placeholder="Auto" value="${F.stat_overrides.ac ?? ''}"
+            oninput="setOverride('ac',this.value)">
+        </div>
+        <div class="field">
+          <label>Initiative Override</label>
+          <input type="number" placeholder="Auto" value="${F.stat_overrides.initiative ?? ''}"
+            oninput="setOverride('initiative',this.value)">
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Spell DC Override</label>
+          <input type="number" placeholder="Auto" value="${F.stat_overrides.spell_dc ?? ''}"
+            oninput="setOverride('spell_dc',this.value)">
+        </div>
+        <div class="field">
+          <label>Spell Atk Override</label>
+          <input type="number" placeholder="Auto" value="${F.stat_overrides.spell_atk ?? ''}"
+            oninput="setOverride('spell_atk',this.value)">
+        </div>
+      </div>
+      <div class="field">
+        <label>Speed Override (ft)</label>
+        <input type="number" placeholder="Auto" value="${F.stat_overrides.speed ?? ''}"
+          oninput="setOverride('speed',this.value)">
+      </div>
+    </div>
+  `;
+
+  renderRacialAsiChooser();
+  updateStep3Derived();
+}
+
+function setOverride(key, val) {
+  if (val === '' || val === null) {
+    delete F.stat_overrides[key];
+  } else {
+    F.stat_overrides[key] = parseInt(val);
+  }
+  updateStep3Derived();
+}
+
+function updateStep3Derived() {
+  const racialAsi = getRacialAsiBonuses();
+
+  // Update individual modifier displays
+  for (const ab of ['str','dex','con','int','wis','cha']) {
+    const el = document.getElementById(`mod_${ab}`);
+    if (el) {
+      const total = (F.ability_scores[ab] || 10) + (racialAsi[ab] || 0);
+      el.textContent = modStr(abilityMod(total));
+    }
+  }
+
+  // Build mock character for calcStats
+  const mockChar = {
+    level: F.level,
+    ability_scores: {},
+    stat_overrides: F.stat_overrides,
+    skill_proficiencies: F.skill_proficiencies,
+    spellcasting_ability: currentClass?.spellcasting_ability,
+    class_save_proficiencies: currentClass?.save_proficiencies || [],
+    race_speed: raceData ? { walk: raceData.speed?.walk ?? 30 } : { walk: 30 },
+  };
+  for (const ab of ['str','dex','con','int','wis','cha']) {
+    mockChar.ability_scores[ab] = (F.ability_scores[ab] || 10) + (racialAsi[ab] || 0);
+  }
+
+  const stats = calcStats(mockChar);
+  const div = document.getElementById('derivedStats');
+  if (!div) return;
+
+  div.innerHTML = `
+    <div class="stat-preview">
+      <div class="stat-preview-box"><div class="stat-preview-val">${stats.ac}</div><div class="stat-preview-lbl">AC</div></div>
+      <div class="stat-preview-box"><div class="stat-preview-val">${modStr(stats.initiative)}</div><div class="stat-preview-lbl">Initiative</div></div>
+      <div class="stat-preview-box"><div class="stat-preview-val">${stats.speed}ft</div><div class="stat-preview-lbl">Speed</div></div>
+      ${currentClass?.spellcasting_ability ? `
+        <div class="stat-preview-box"><div class="stat-preview-val">${stats.spellDC}</div><div class="stat-preview-lbl">Spell DC</div></div>
+        <div class="stat-preview-box"><div class="stat-preview-val">${modStr(stats.spellAtk)}</div><div class="stat-preview-lbl">Spell Atk</div></div>
+      ` : ''}
+      <div class="stat-preview-box"><div class="stat-preview-val">+${stats.pb}</div><div class="stat-preview-lbl">Prof Bonus</div></div>
+    </div>
+  `;
+}
+
+// ── Step 4: Skills, Feats & Spells ─────────────────────────────────
+async function renderStep4() {
+  const el = document.getElementById('step4');
+  el.innerHTML = `<div class="loading">Loading spell list...</div>`;
+
+  // Load spells for this class
+  if (F.class_id && currentClass) {
+    try {
+      const subQ = F.subclass_id ? `&subclass_id=${F.subclass_id}` : '';
+      currentSpells = await API.get(`/spells?class=${encodeURIComponent(currentClass.name.toLowerCase())}&level=0-9${subQ}`);
+    } catch(e) { currentSpells = []; }
+  }
+
+  // Determine skill proficiency count from class
+  const classSkillCount = getClassSkillCount(currentClass?.name);
+  const bgSkills = getBgSkillGrants();
+  const classSkills = getClassSkillOptions(currentClass?.name);
+
+  // Determine how many feats player should have
+  const asiLevels = getASILevels(currentClass?.name, F.level);
+
+  // Progression info for spell counts
+  const prog = currentClassProgression.find(r => r.level === F.level);
+  const maxCantrips = prog?.cantrips_known ?? 0;
+  const maxSpellsKnown = prog?.spells_known ?? null; // null = prepared caster
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-title">Skill Proficiencies</div>
+      <div class="field-hint" style="margin-bottom:10px">
+        Choose <strong style="color:var(--gold)">${classSkillCount}</strong> skills from your class list. Background and racial grants are pre-selected.
+      </div>
+      <div class="skills-grid" id="skillsGrid"></div>
+    </div>
+    <div id="proficiencyChoices"></div>
+    ${currentClass?.spellcasting_ability ? `
+    <div class="card">
+      <div class="card-title">Cantrips${maxCantrips > 0 ? ` — Choose <strong style="color:var(--gold)">${maxCantrips}</strong>` : ''}</div>
+      ${maxCantrips > 0 ? `
+        <div class="spell-search"><input class="field input" id="cantripSearch" type="text" placeholder="Search cantrips..." oninput="filterSpells('cantrip')" style="width:100%;background:#1a1510;border:1px solid var(--border);border-radius:4px;color:var(--text);padding:7px 10px;font-size:13px;font-family:inherit;outline:none"></div>
+        <div class="slot-budget">Selected: <strong id="cantripCount">0</strong> / ${maxCantrips}</div>
+        <div class="spell-list" id="cantripList"></div>
+      ` : '<div style="font-size:12px;color:var(--dim)">This class/level does not gain cantrips.</div>'}
+    </div>
+    <div class="card">
+      <div class="card-title">Spells ${maxSpellsKnown !== null ? `— Know <strong style="color:var(--gold)">${maxSpellsKnown}</strong>` : '(Prepared — add to spellbook)'}</div>
+      <div class="spell-search"><input class="field input" id="spellSearch" type="text" placeholder="Search spells..." oninput="filterSpells('spell')" style="width:100%;background:#1a1510;border:1px solid var(--border);border-radius:4px;color:var(--text);padding:7px 10px;font-size:13px;font-family:inherit;outline:none"></div>
+      <div class="slot-budget">Selected: <strong id="spellKnownCount">0</strong>${maxSpellsKnown !== null ? ` / ${maxSpellsKnown}` : ''}</div>
+      <div class="spell-list" id="spellList"></div>
+    </div>` : ''}
+    <div class="card">
+      <div class="card-title">Feats${asiLevels > 0 ? ` — <span style="color:var(--dim)">Up to ${asiLevels} ASI/feat${asiLevels>1?'s':''} at your level</span>` : ''}</div>
+      <div class="spell-search"><input class="field input" id="featSearch" type="text" placeholder="Search feats..." oninput="filterFeats()" style="width:100%;background:#1a1510;border:1px solid var(--border);border-radius:4px;color:var(--text);padding:7px 10px;font-size:13px;font-family:inherit;outline:none"></div>
+      <div class="feat-list" id="featList"></div>
+    </div>
+  `;
+
+  renderSkillsGrid(classSkills, bgSkills, classSkillCount);
+  renderProficiencyChoosers();
+  if (currentClass?.spellcasting_ability) {
+    filterSpells('cantrip');
+    filterSpells('spell');
+  }
+  filterFeats();
+}
+
+function getClassSkillCount(className) {
+  const counts = {
+    bard: 3, ranger: 3, rogue: 4,
+    druid: 2, fighter: 2, barbarian: 2, monk: 2,
+    paladin: 2, cleric: 2, sorcerer: 2, warlock: 2,
+    wizard: 2, artificer: 2,
+  };
+  return counts[className?.toLowerCase()] || 2;
+}
+
+function getClassSkillOptions(className) {
+  // Simplified — real implementation would read from class data
+  const all = SKILLS.map(s => s.key);
+  const limited = {
+    fighter: ['acrobatics','animal_handling','athletics','history','insight','intimidation','perception','survival'],
+    barbarian: ['animal_handling','athletics','intimidation','nature','perception','survival'],
+    paladin: ['athletics','insight','intimidation','medicine','persuasion','religion'],
+    monk: ['acrobatics','athletics','history','insight','religion','stealth'],
+    warlock: ['arcana','deception','history','intimidation','investigation','nature','religion'],
+    wizard: ['arcana','history','insight','investigation','medicine','religion'],
+    cleric: ['history','insight','medicine','persuasion','religion'],
+    druid: ['arcana','animal_handling','insight','medicine','nature','perception','religion','survival'],
+    sorcerer: ['arcana','deception','insight','intimidation','persuasion','religion'],
+    bard: all, rogue: all, ranger: all,
+  };
+  return limited[className?.toLowerCase()] || all;
+}
+
+function getBgSkillGrants() {
+  return getAllGrantedSkills();
+}
+
+function getASILevels(className, level) {
+  // Standard ASI levels; fighter gets extras
+  const name = className?.toLowerCase();
+  const fighter = [4,6,8,12,14,16,19];
+  const rogue = [4,8,10,12,16,18];
+  const standard = [4,8,12,16,19];
+  const levels = name === 'fighter' ? fighter : name === 'rogue' ? rogue : standard;
+  return levels.filter(l => l <= level).length;
+}
+
+function renderSkillsGrid(classOptions, bgGrants, maxChoices) {
+  const grid = document.getElementById('skillsGrid');
+  if (!grid) return;
+
+  let chosen = Object.keys(F.skill_proficiencies).filter(k => F.skill_proficiencies[k] === 'proficient' && !bgGrants.includes(k)).length;
+
+  grid.innerHTML = SKILLS.map(sk => {
+    const fromBg = bgGrants.includes(sk.key);
+    const inClass = classOptions.includes(sk.key);
+    const checked = !!F.skill_proficiencies[sk.key] || fromBg;
+    const locked = fromBg || (!inClass && !checked);
+
+    return `
+      <div class="skill-row ${locked ? 'locked' : ''}" onclick="${locked ? '' : `toggleSkill('${sk.key}','${inClass}',${maxChoices})`}">
+        <div class="skill-check ${checked ? 'checked' : ''}" id="sk_${sk.key}">${checked ? '✓' : ''}</div>
+        <div class="skill-name">${sk.name}</div>
+        <div class="skill-ability">${sk.ability.toUpperCase()}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function toggleSkill(key, inClass, maxChoices) {
+  const bgGrants = getBgSkillGrants();
+  if (bgGrants.includes(key)) return;
+
+  const current = F.skill_proficiencies[key];
+  if (current === 'proficient') {
+    delete F.skill_proficiencies[key];
+  } else {
+    // Count non-bg proficient skills
+    const chosen = Object.keys(F.skill_proficiencies).filter(k =>
+      F.skill_proficiencies[k] === 'proficient' && !bgGrants.includes(k)
+    ).length;
+    if (chosen >= maxChoices) { toast(`You may only choose ${maxChoices} class skills.`, 'warn'); return; }
+    F.skill_proficiencies[key] = 'proficient';
+  }
+
+  const el = document.getElementById(`sk_${key}`);
+  if (el) {
+    const checked = !!F.skill_proficiencies[key];
+    el.className = `skill-check ${checked ? 'checked' : ''}`;
+    el.textContent = checked ? '✓' : '';
+  }
+}
+
+function filterSpells(type) {
+  const isCantrip = type === 'cantrip';
+  const searchEl = document.getElementById(isCantrip ? 'cantripSearch' : 'spellSearch');
+  const listEl = document.getElementById(isCantrip ? 'cantripList' : 'spellList');
+  const countEl = document.getElementById(isCantrip ? 'cantripCount' : 'spellKnownCount');
+  if (!listEl) return;
+
+  const search = searchEl?.value.toLowerCase() || '';
+  const prog = currentClassProgression.find(r => r.level === F.level);
+
+  // For non-cantrip: filter spells up to max accessible level
+  let maxSlotLevel = getMaxSelectableSpellLevel(prog, currentClass?.caster_progression);
+
+  const filtered = currentSpells.filter(sp => {
+    if (isCantrip && sp.level !== 0) return false;
+    if (!isCantrip && sp.level === 0) return false;
+    if (!isCantrip && sp.level > maxSlotLevel) return false;
+    if (search && !sp.name.toLowerCase().includes(search)) return false;
+    return true;
+  });
+
+  const selectedSet = new Set(isCantrip
+    ? (F.spells_known.filter(id => currentSpells.find(s => s.id === id && s.level === 0)))
+    : (F.spells_known.filter(id => currentSpells.find(s => s.id === id && s.level > 0)))
+  );
+  if (countEl) countEl.textContent = selectedSet.size;
+
+  // Group by level
+  const byLevel = {};
+  for (const sp of filtered) {
+    if (!byLevel[sp.level]) byLevel[sp.level] = [];
+    byLevel[sp.level].push(sp);
+  }
+
+  let html = '';
+  for (const [lvl, spells] of Object.entries(byLevel).sort((a,b) => a[0]-b[0])) {
+    html += `<div class="spell-level-header">${+lvl === 0 ? 'Cantrips' : `${ordinal(+lvl)}-Level Spells`}</div>`;
+    for (const sp of spells) {
+      const sel = selectedSet.has(sp.id);
+      html += `
+        <div class="spell-item ${sel ? 'selected' : ''}" onclick="toggleSpell(${sp.id},${isCantrip?1:0})">
+          <div class="spell-item-check"></div>
+          <div class="spell-item-name">${sp.name}</div>
+          <div class="spell-item-meta">${sp.school ? (SCHOOL_NAMES[sp.school]||sp.school).slice(0,3) : ''} · ${sp.casting_time || '1 action'}${sp.concentration ? ' · C' : ''}${sp.ritual ? ' · R' : ''}</div>
+        </div>
+      `;
+    }
+  }
+  listEl.innerHTML = html || `<div style="padding:12px;font-size:12px;color:var(--dim)">No spells found.</div>`;
+}
+
+function highestSlotLevel(spellSlots) {
+  if (!Array.isArray(spellSlots)) return 0;
+  for (let i = spellSlots.length - 1; i >= 0; i--) {
+    if ((spellSlots[i] || 0) > 0) return i + 1;
+  }
+  return 0;
+}
+
+function getMaxSelectableSpellLevel(prog, casterProgression) {
+  const maxFromSlots = highestSlotLevel(prog?.spell_slots || []);
+  if (!maxFromSlots) return 0;
+  return maxFromSlots;
+}
+
+function toggleSpell(id, isCantrip) {
+  const prog = currentClassProgression.find(r => r.level === F.level);
+  const maxCantrips = prog?.cantrips_known ?? 0;
+  const maxKnown = prog?.spells_known ?? null;
+
+  const idx = F.spells_known.indexOf(id);
+  if (idx >= 0) {
+    F.spells_known.splice(idx, 1);
+  } else {
+    if (isCantrip) {
+      const count = F.spells_known.filter(sid => currentSpells.find(s=>s.id===sid&&s.level===0)).length;
+      if (count >= maxCantrips) { toast(`Maximum ${maxCantrips} cantrips.`, 'warn'); return; }
+    } else if (maxKnown !== null) {
+      const count = F.spells_known.filter(sid => currentSpells.find(s=>s.id===sid&&s.level>0)).length;
+      if (count >= maxKnown) { toast(`Maximum ${maxKnown} spells known.`, 'warn'); return; }
+    }
+    F.spells_known.push(id);
+  }
+  filterSpells(isCantrip ? 'cantrip' : 'spell');
+}
+
+function filterFeats() {
+  const search = document.getElementById('featSearch')?.value.toLowerCase() || '';
+  const list = document.getElementById('featList');
+  if (!list) return;
+
+  const filtered = currentFeats.filter(f =>
+    !search || f.name.toLowerCase().includes(search)
+  );
+
+  list.innerHTML = filtered.map(f => {
+    const sel = F.feats.includes(f.id);
+    const prereqs = f.prerequisites?.map(p => {
+      if (p.ability) return `Ability: ${Object.entries(p.ability[0]).map(([k,v])=>`${k.toUpperCase()} ${v}+`).join(', ')}`;
+      if (p.race) return `Race: ${p.race.map(r=>r.name).join(' or ')}`;
+      if (p.spellcasting) return 'Spellcasting';
+      if (p.level) return `Level ${p.level}`;
+      return null;
+    }).filter(Boolean).join('; ') || '';
+
+    return `
+      <div class="feat-item ${sel ? 'selected' : ''}" onclick="toggleFeat(${f.id})">
+        <div class="feat-item-check"></div>
+        <div>
+          <div class="feat-item-name">${f.name} <span style="color:var(--dim);font-size:10px">(${f.source})</span></div>
+          ${prereqs ? `<div class="feat-prereq">Requires: ${prereqs}</div>` : ''}
+        </div>
+      </div>
+    `;
+  }).join('') || `<div style="padding:12px;font-size:12px;color:var(--dim)">No feats found.</div>`;
+}
+
+function toggleFeat(id) {
+  const idx = F.feats.indexOf(id);
+  if (idx >= 0) F.feats.splice(idx, 1);
+  else F.feats.push(id);
+  filterFeats();
+}
+
+// ── Step 5: HP & Equipment ─────────────────────────────────────────
+function renderStep5() {
+  const el = document.getElementById('step5');
+
+  // Calc suggested HP
+  const racialAsi = getRacialAsiBonuses();
+  const conScore = (F.ability_scores.con || 10) + (racialAsi.con || 0);
+  const conMod = abilityMod(conScore);
+  const hitDie = currentClass?.hit_die || 8;
+  const avgPerLevel = Math.floor(hitDie / 2) + 1;
+  const suggestedHp = hitDie + conMod + ((F.level - 1) * (avgPerLevel + conMod));
+  const hp = F.hp_max ?? Math.max(1, suggestedHp);
+
+  const armorTypes = [
+    { key:'unarmored', label:'Unarmored', ac:`10 + DEX mod (${modStr(abilityMod((F.ability_scores.dex||10)+(racialAsi.dex||0)))})` },
+    { key:'mage_armor', label:'Mage Armor', ac:`13 + DEX mod` },
+    { key:'leather', label:'Leather Armor', ac:'11 + DEX mod' },
+    { key:'studded', label:'Studded Leather', ac:'12 + DEX mod' },
+    { key:'chain_shirt', label:'Chain Shirt', ac:'13 + DEX mod (max +2)' },
+    { key:'scale', label:'Scale Mail', ac:'14 + DEX mod (max +2)' },
+    { key:'half_plate', label:'Half Plate', ac:'15 + DEX mod (max +2)' },
+    { key:'ring', label:'Ring Mail', ac:'14' },
+    { key:'chain', label:'Chain Mail', ac:'16' },
+    { key:'splint', label:'Splint', ac:'17' },
+    { key:'plate', label:'Plate', ac:'18' },
+    { key:'shield', label:'+ Shield', ac:'+2' },
+  ];
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-title">Hit Points</div>
+      <div class="hp-calc">
+        <strong>Hit Die:</strong> d${hitDie} · <strong>CON Mod:</strong> ${modStr(conMod)} · <strong>Level:</strong> ${F.level}<br>
+        Suggested: <strong>${Math.max(1, suggestedHp)} HP</strong> (max die at 1st + avg for remaining levels)
+      </div>
+      <div class="field" style="margin-top:12px">
+        <label>Max HP (your DM may set this differently)</label>
+        <input type="number" id="f_hp" min="1" value="${hp}"
+          oninput="F.hp_max=parseInt(this.value)||null">
+        <div class="field-hint">You can change this at any time on the character sheet.</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Armor</div>
+      <div class="field">
+        <label>Armor Type</label>
+        <select id="f_armor" onchange="F.armor_type=this.value;updateArmorAC()">
+          ${armorTypes.map(a => `<option value="${a.key}" ${a.key===F.armor_type?'selected':''}>${a.label} — AC: ${a.ac}</option>`).join('')}
+        </select>
+        <div class="field-hint" id="armorHint"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Review</div>
+      <div id="review" style="font-size:13px;line-height:2;color:var(--text)"></div>
+    </div>
+  `;
+
+  updateArmorAC();
+  renderReview();
+}
+
+function updateArmorAC() {
+  const racialAsi = getRacialAsiBonuses();
+  const dexMod = abilityMod((F.ability_scores.dex || 10) + (racialAsi.dex || 0));
+  const armor = F.armor_type;
+  let ac;
+  if (armor === 'unarmored')  ac = 10 + dexMod;
+  else if (armor === 'mage_armor') ac = 13 + dexMod;
+  else if (armor === 'leather') ac = 11 + dexMod;
+  else if (armor === 'studded') ac = 12 + dexMod;
+  else if (armor === 'chain_shirt') ac = 13 + Math.min(2, dexMod);
+  else if (armor === 'scale') ac = 14 + Math.min(2, dexMod);
+  else if (armor === 'half_plate') ac = 15 + Math.min(2, dexMod);
+  else if (armor === 'ring') ac = 14;
+  else if (armor === 'chain') ac = 16;
+  else if (armor === 'splint') ac = 17;
+  else if (armor === 'plate') ac = 18;
+  else if (armor === 'shield') ac = (F.stat_overrides.ac || 10) + 2;
+  else ac = 10 + dexMod;
+
+  if (armor !== 'shield') F.stat_overrides.ac = ac;
+  const hint = document.getElementById('armorHint');
+  if (hint) hint.textContent = `Sets AC to ${armor !== 'shield' ? ac : 'base + 2'}`;
+  renderReview();
+}
+
+function renderReview() {
+  const rev = document.getElementById('review');
+  if (!rev) return;
+  const raceName = allRaces.find(r => r.id === F.race_id)?.name || '—';
+  const bgName = allBackgrounds.find(b => b.id === F.background_id)?.name || '—';
+  const className = allClasses.find(c => c.id === F.class_id)?.name || '—';
+  const subName = currentSubclasses.find(s => s.id === F.subclass_id)?.name || '';
+  const hp = parseInt(document.getElementById('f_hp')?.value) || F.hp_max || '?';
+  const ac = F.stat_overrides.ac ?? '?';
+  const langs = (F.language_proficiencies || []).map(v => v.replace(/\b\w/g, c => c.toUpperCase())).join(', ') || '—';
+  const tools = (F.tool_proficiencies || []).map(v => v.replace(/\b\w/g, c => c.toUpperCase())).join(', ') || '—';
+
+  rev.innerHTML = `
+    <div><strong style="color:var(--gold)">${F.name || 'Unnamed'}</strong></div>
+    <div>${raceName} · ${className}${subName ? ` (${subName})` : ''} · Level ${F.level}</div>
+    <div>Background: ${bgName}${F.alignment ? ` · ${F.alignment}` : ''}</div>
+    <div>HP: <strong style="color:var(--gold)">${hp}</strong> · AC: <strong style="color:var(--gold)">${ac}</strong></div>
+    <div>Languages: ${langs}</div>
+    <div>Tools: ${tools}</div>
+    <div>Spells: ${F.spells_known.length} selected · Feats: ${F.feats.length} selected</div>
+  `;
+}
+
+// ── Submit ──────────────────────────────────────────────────────────
+async function submit() {
+  if (!F.name.trim()) { step = 1; renderStep(); toast('Character name is required.', 'error'); return; }
+  if (!F.class_id) { step = 2; renderStep(); toast('Please select a class.', 'error'); return; }
+
+  updateDerivedProficiencies();
+  const pickedSkills = Object.values(F.proficiency_choices?.skill || {}).filter(Boolean);
+  const pickedLangs = Object.values(F.proficiency_choices?.language || {}).filter(Boolean);
+  const pickedTools = Object.values(F.proficiency_choices?.tool || {}).filter(Boolean);
+  if (new Set(pickedSkills).size !== pickedSkills.length || new Set(pickedLangs).size !== pickedLangs.length || new Set(pickedTools).size !== pickedTools.length) {
+    toast('Duplicate proficiency choices are not allowed.', 'error');
+    return;
+  }
+  const hp = parseInt(document.getElementById('f_hp')?.value) || F.hp_max || null;
+  const racialAsi = getRacialAsiBonuses();
+  if (hp) {
+    F.stat_overrides = F.stat_overrides || {};
+    F.stat_overrides.hp_max = hp;
+  }
+  F.stat_overrides.race_asi_applied = true;
+  F.stat_overrides.race_asi_mode = F.race_asi_mode;
+  F.stat_overrides.race_asi_choices = F.race_asi_choices;
+  F.stat_overrides.proficiency_choices = F.proficiency_choices;
+  F.stat_overrides.languages = F.language_proficiencies;
+  F.stat_overrides.tools = F.tool_proficiencies;
+
+  const finalScores = {};
+  for (const ab of ['str','dex','con','int','wis','cha']) {
+    finalScores[ab] = (F.ability_scores[ab] || 10) + (racialAsi[ab] || 0);
+  }
+
+  const prog = currentClassProgression.find(r => r.level === F.level);
+  const maxCantrips = prog?.cantrips_known ?? 0;
+  const maxKnown = prog?.spells_known ?? null;
+  const knownCantrips = F.spells_known.filter(id => currentSpells.find(s => s.id === id && s.level === 0));
+  const knownLeveled = F.spells_known.filter(id => currentSpells.find(s => s.id === id && s.level > 0));
+  if (knownCantrips.length > maxCantrips) {
+    toast(`You selected ${knownCantrips.length} cantrips; maximum is ${maxCantrips}.`, 'error');
+    return;
+  }
+  if (maxKnown !== null && knownLeveled.length > maxKnown) {
+    toast(`You selected ${knownLeveled.length} spells; maximum is ${maxKnown}.`, 'error');
+    return;
+  }
+
+  // Set bg skills in proficiencies
+  for (const sk of getBgSkillGrants()) {
+    if (!F.skill_proficiencies[sk]) F.skill_proficiencies[sk] = 'proficient';
+  }
+
+  const payload = {
+    name: F.name.trim(),
+    class_id: F.class_id,
+    subclass_id: F.subclass_id || null,
+    race_id: F.race_id || null,
+    background_id: F.background_id || null,
+    level: F.level,
+    experience_points: F.experience_points,
+    alignment: F.alignment || null,
+    ability_scores: finalScores,
+    stat_overrides: F.stat_overrides,
+    skill_proficiencies: F.skill_proficiencies,
+    spells_known: F.spells_known,
+    spellbook: F.spellbook,
+    feats: F.feats,
+    personality_traits: F.personality_traits,
+    ideals: F.ideals,
+    bonds: F.bonds,
+    flaws: F.flaws,
+    appearance: F.appearance,
+    hp_max: hp,
+  };
+
+  const saveBtn = document.getElementById('saveEditBtn');
+  saveBtn.disabled = true;
+  saveBtn.textContent = isEditMode ? 'Saving...' : 'Creating...';
+
+  try {
+    if (isEditMode) {
+      await API.put(`/characters/${editId}`, payload);
+      window.location.href = `/sheet.html?id=${editId}`;
+    } else {
+      const char = await API.post('/characters', payload);
+      window.location.href = `/sheet.html?id=${char.id}`;
+    }
+  } catch (err) {
+    toast(`Failed: ${err.message}`, 'error');
+    saveBtn.disabled = false;
+    saveBtn.textContent = isEditMode ? 'Save Changes' : 'Create Character';
+  }
+}
+
+init();
+</script>
+</body>
+</html>
