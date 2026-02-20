@@ -189,7 +189,7 @@ function profBonus(level) {
 function calcStats(char) {
   const scores = char.ability_scores || {str:10,dex:10,con:10,int:10,wis:10,cha:10};
   const overrides = char.stat_overrides || {};
-  const skillProfs = char.skill_proficiencies || {};
+  const skillProfs = overrides.skill_proficiencies || char.skill_proficiencies || {};
   const pb = profBonus(char.level || 1);
 
   const mods = {};
@@ -212,7 +212,7 @@ function calcStats(char) {
 
   // Saving throws
   const saves = {};
-  const classSaves = char.class_save_proficiencies || [];
+  const classSaves = overrides.save_proficiencies || char.class_save_proficiencies || [];
   for (const ab of Object.keys(scores)) {
     const key = `save_${ab}`;
     if (overrides[key] !== undefined) {

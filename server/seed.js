@@ -236,6 +236,123 @@ function extractSpellsKnownProgression(cls) {
   return null;
 }
 
+function cloneJSON(obj) {
+  return obj ? JSON.parse(JSON.stringify(obj)) : obj;
+}
+
+function normalizeSpeed(speed) {
+  if (speed == null) return { walk: 30 };
+  if (typeof speed === 'number') return { walk: speed };
+  if (typeof speed === 'object') return speed;
+  return { walk: 30 };
+}
+
+function applyEntriesMod(entries, mod) {
+  let result = Array.isArray(entries) ? cloneJSON(entries) : [];
+  if (!mod) return result;
+  const ops = Array.isArray(mod) ? mod : [mod];
+  for (const op of ops) {
+    const mode = op?.mode;
+    const items = op?.items === undefined ? [] : (Array.isArray(op.items) ? op.items : [op.items]);
+    if (mode === 'replaceArr') {
+      const replaceName = op?.replace;
+      if (!replaceName) continue;
+      const idx = result.findIndex(e => e?.name === replaceName);
+      if (idx === -1) result.push(...items);
+      else result.splice(idx, 1, ...items);
+      continue;
+    }
+    if (mode === 'appendArr') {
+      result.push(...items);
+      continue;
+    }
+    if (mode === 'removeArr') {
+      const names = op?.names ? (Array.isArray(op.names) ? op.names : [op.names]) : [];
+      if (!names.length) continue;
+      result = result.filter(e => !names.includes(e?.name));
+    }
+  }
+  return result;
+}
+
+function buildRaceKey(race) {
+  return `${race?.name ?? ''}|${race?.source ?? ''}`;
+}
+
+function buildSubraceKey(race) {
+  return `${race?.name ?? ''}|${race?.source ?? ''}|${race?.raceName ?? ''}|${race?.raceSource ?? ''}`;
+}
+
+function resolveRaceCopy(race, raceMap, cache) {
+  const key = buildRaceKey(race);
+  if (cache.has(key)) return cloneJSON(cache.get(key));
+
+  if (!race?._copy) {
+    const result = cloneJSON(race);
+    if (result) delete result._copy;
+    cache.set(key, result);
+    return cloneJSON(result);
+  }
+
+  const copyKey = buildRaceKey(race._copy);
+  const base = raceMap.get(copyKey);
+  if (!base) {
+    console.warn(`  Warning: race copy base not found: ${copyKey}`);
+    const result = cloneJSON(race);
+    if (result) delete result._copy;
+    cache.set(key, result);
+    return cloneJSON(result);
+  }
+
+  const baseResolved = resolveRaceCopy(base, raceMap, cache);
+  const result = cloneJSON(baseResolved);
+  if (race._copy._mod?.entries) {
+    result.entries = applyEntriesMod(result.entries, race._copy._mod.entries);
+  }
+  for (const [k, v] of Object.entries(race)) {
+    if (k === '_copy') continue;
+    result[k] = cloneJSON(v);
+  }
+  delete result._copy;
+  cache.set(key, result);
+  return cloneJSON(result);
+}
+
+function resolveSubraceCopy(race, subraceMap, cache) {
+  const key = buildSubraceKey(race);
+  if (cache.has(key)) return cloneJSON(cache.get(key));
+
+  if (!race?._copy) {
+    const result = cloneJSON(race);
+    if (result) delete result._copy;
+    cache.set(key, result);
+    return cloneJSON(result);
+  }
+
+  const copyKey = buildSubraceKey(race._copy);
+  const base = subraceMap.get(copyKey);
+  if (!base) {
+    console.warn(`  Warning: subrace copy base not found: ${copyKey}`);
+    const result = cloneJSON(race);
+    if (result) delete result._copy;
+    cache.set(key, result);
+    return cloneJSON(result);
+  }
+
+  const baseResolved = resolveSubraceCopy(base, subraceMap, cache);
+  const result = cloneJSON(baseResolved);
+  if (race._copy._mod?.entries) {
+    result.entries = applyEntriesMod(result.entries, race._copy._mod.entries);
+  }
+  for (const [k, v] of Object.entries(race)) {
+    if (k === '_copy') continue;
+    result[k] = cloneJSON(v);
+  }
+  delete result._copy;
+  cache.set(key, result);
+  return cloneJSON(result);
+}
+
 function buildClassSpecific(cls, level) {
   const specific = {};
   const name = cls.name?.toLowerCase();
@@ -457,13 +574,36 @@ async function seedRaces() {
   console.log('Seeding races...');
   try {
     const data = await fetchJSON(`${BASE}/races.json`);
-    const races = data.race || [];
+    const raceList = data.race || [];
+    const subraceList = data.subrace || [];
 
-    // First pass: base races (no raceName field)
-    const baseRaces = races.filter(r => !r.raceName);
-    for (const race of baseRaces) {
-      if (race._copy) continue; // skip copy-derived entries for now
-      const speed = typeof race.speed === 'object' ? race.speed : { walk: race.speed ?? 30 };
+    // Resolve base races (including _copy) and expand _versions
+    const baseRacesRaw = raceList.filter(r => !r.raceName);
+    const baseRaceMap = new Map(baseRacesRaw.map(r => [buildRaceKey(r), r]));
+    const baseRaceCache = new Map();
+    const baseRacesResolved = [];
+
+    for (const race of baseRacesRaw) {
+      const resolved = resolveRaceCopy(race, baseRaceMap, baseRaceCache);
+      if (resolved) baseRacesResolved.push(resolved);
+
+      for (const version of (race._versions || [])) {
+        if (version._abstract) continue;
+        const baseClone = cloneJSON(resolved);
+        const modEntries = version._mod?.entries;
+        const entries = applyEntriesMod(baseClone.entries, modEntries);
+        const merged = { ...baseClone, ...cloneJSON(version), entries };
+        delete merged._mod;
+        delete merged._abstract;
+        delete merged._versions;
+        baseRacesResolved.push(merged);
+      }
+    }
+
+    const baseRacesByName = new Map();
+    for (const race of baseRacesResolved) {
+      if (race?.name && !baseRacesByName.has(race.name)) baseRacesByName.set(race.name, race);
+      const speed = normalizeSpeed(race.speed);
       insertRace.run({
         name: race.name,
         source: race.source,
@@ -476,20 +616,28 @@ async function seedRaces() {
       });
     }
 
-    // Second pass: subraces (have raceName field)
-    const subraces = races.filter(r => r.raceName);
-    for (const race of subraces) {
-      if (race._copy) continue;
+    // Resolve subraces (including _copy), and inherit base fields for summary columns
+    const subracesRaw = [...subraceList, ...raceList.filter(r => r.raceName)];
+    const subraceMap = new Map(subracesRaw.map(r => [buildSubraceKey(r), r]));
+    const subraceCache = new Map();
+    const subracesResolved = subracesRaw.map(r => resolveSubraceCopy(r, subraceMap, subraceCache));
+
+    for (const race of subracesResolved) {
       const parentRow = db.prepare('SELECT id FROM races WHERE name = ? AND parent_race_id IS NULL').get(race.raceName);
-      const speed = typeof race.speed === 'object' ? race.speed : { walk: race.speed ?? 30 };
+      const parentRace = baseRacesByName.get(race.raceName);
+      const speed = normalizeSpeed(race.speed ?? parentRace?.speed);
+      const ability = race.ability ?? parentRace?.ability ?? [];
+      const darkvision = race.darkvision ?? parentRace?.darkvision ?? 0;
+      const traitTags = race.traitTags ?? parentRace?.traitTags ?? [];
+
       insertRace.run({
         name: `${race.raceName} (${race.name})`,
         source: race.source,
         parent_race_id: parentRow?.id ?? null,
         speed_json: JSON.stringify(speed),
-        ability_json: JSON.stringify(race.ability || []),
-        darkvision: race.darkvision ?? 0,
-        trait_tags: JSON.stringify(race.traitTags || []),
+        ability_json: JSON.stringify(ability),
+        darkvision,
+        trait_tags: JSON.stringify(traitTags),
         data_json: JSON.stringify(race),
       });
     }

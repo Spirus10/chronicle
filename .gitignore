@@ -4,3 +4,5 @@ data/*.db-wal
 data/*.db-shm
 .env
 *.log
+character-sheet.gif
+valen-tracker.html

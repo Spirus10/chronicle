@@ -7,7 +7,7 @@ const router = express.Router();
 router.get('/', (req, res) => {
   const rows = db.prepare(`
     SELECT id, name, source, parent_race_id, speed_json, ability_json, darkvision, trait_tags
-    FROM races ORDER BY parent_race_id NULLS FIRST, name
+    FROM races ORDER BY name, source
   `).all();
   res.json(rows.map(r => ({
     ...r,
