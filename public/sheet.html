@@ -189,40 +189,53 @@ body::before{content:'';position:fixed;inset:0;background:
 .btn-sm{padding:3px 8px;font-size:10px}
 
 .action-btn{position:relative;overflow:visible}
-.action-btn[data-tip]:hover::after,
-.action-name[data-tip]:hover::after{
-  content:attr(data-tip);
-  position:absolute;
-  left:50%;
-  bottom:calc(100% + 10px);
-  transform:translateX(-50%);
-  width:max-content;
-  max-width:280px;
-  white-space:normal;
-  padding:8px 10px;
-  border-radius:8px;
-  font-size:11px;
-  line-height:1.35;
-  letter-spacing:0.2px;
+.action-name[data-tip],
+.action-btn[data-tip]{cursor:help}
+
+.md-tooltip{
+  position:fixed;
+  left:0;
+  top:0;
+  width:min(560px,calc(100vw - 20px));
+  max-height:min(60vh,520px);
+  overflow:auto;
+  padding:14px 16px;
+  border-radius:10px;
   color:var(--text);
-  background:rgba(28,24,19,0.96);
-  border:1px solid rgba(138,127,109,0.45);
-  box-shadow:0 8px 24px rgba(0,0,0,0.45);
-  z-index:300;
+  background:rgba(24,20,31,0.98);
+  border:1px solid rgba(138,127,109,0.55);
+  box-shadow:0 16px 36px rgba(0,0,0,0.5);
+  z-index:1200;
+  opacity:0;
+  transform:translateY(4px);
+  transition:opacity 0.12s ease, transform 0.12s ease;
   pointer-events:none;
 }
-.action-btn[data-tip]:hover::before,
-.action-name[data-tip]:hover::before{
-  content:'';
-  position:absolute;
-  left:50%;
-  bottom:calc(100% + 4px);
-  transform:translateX(-50%);
-  border:6px solid transparent;
-  border-top-color:rgba(28,24,19,0.96);
-  z-index:300;
-  pointer-events:none;
-}
+.md-tooltip.visible{opacity:1;transform:translateY(0)}
+.md-tooltip.pinned{pointer-events:auto}
+.md-tooltip-content{font-size:13px;line-height:1.6;letter-spacing:0.1px}
+.md-tooltip-content p{margin:0 0 10px}
+.md-tooltip-content p:last-child{margin-bottom:0}
+.md-tooltip-content h1,.md-tooltip-content h2,.md-tooltip-content h3,.md-tooltip-content h4{color:var(--ink);line-height:1.25;margin:0 0 8px}
+.md-tooltip-content h1{font-size:18px}
+.md-tooltip-content h2{font-size:16px}
+.md-tooltip-content h3{font-size:14px}
+.md-tooltip-content h4{font-size:13px;letter-spacing:0.5px;text-transform:uppercase;color:var(--gold)}
+.md-tooltip-content ul,.md-tooltip-content ol{margin:0 0 10px 18px;padding:0}
+.md-tooltip-content li{margin:0 0 4px}
+.md-tooltip-content code{font-family:'Consolas','Monaco','Courier New',monospace;background:rgba(78,163,255,0.14);padding:1px 4px;border-radius:4px;color:#b8d8ff}
+.md-tooltip-content pre{margin:0 0 10px;padding:10px 12px;background:rgba(12,10,17,0.8);border:1px solid rgba(78,163,255,0.22);border-radius:8px;overflow:auto}
+.md-tooltip-content pre code{background:transparent;padding:0;border-radius:0}
+.md-tooltip-content blockquote{margin:0 0 10px;padding:8px 10px;border-left:3px solid rgba(180,140,60,0.7);background:rgba(180,140,60,0.08);color:#e2d4b4}
+.md-tooltip-content hr{border:none;border-top:1px solid rgba(138,127,109,0.45);margin:8px 0}
+.md-tooltip-content .md-tag{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;line-height:1.3;border:1px solid;margin:0 1px}
+.md-tooltip-content .md-tag-condition{background:rgba(195,72,72,0.2);border-color:rgba(195,72,72,0.5);color:#f2a7a7}
+.md-tooltip-content .md-tag-status{background:rgba(180,140,60,0.2);border-color:rgba(180,140,60,0.5);color:#e7c98b}
+.md-tooltip-content .md-tag-skill{background:rgba(78,163,255,0.2);border-color:rgba(78,163,255,0.5);color:#b9dbff}
+.md-tooltip-content .weapon-tip-grid{display:grid;grid-template-columns:1fr 1fr;column-gap:24px;margin:4px 0 0}
+.md-tooltip-content .weapon-tip-col{min-width:0}
+.md-tooltip-content .weapon-tip-label{font-size:11px;letter-spacing:0.7px;text-transform:uppercase;color:var(--dim);margin-bottom:4px}
+.md-tooltip-content .weapon-tip-value code{font-size:13px;padding:2px 6px}
 
 /* ── Slots ── */
 .slot-dot{width:20px;height:20px;border-radius:50%;cursor:pointer;transition:all 0.2s;border:2px solid}
@@ -476,6 +489,8 @@ body::before{content:'';position:fixed;inset:0;background:
 </div>
 
 <script src="/js/shared.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
 <script>
 // ── State ─────────────────────────────────────────────────────────
 const charId = new URLSearchParams(location.search).get('id');
@@ -501,6 +516,12 @@ let effectsBySource = { spell: {}, class_feature: {}, optional_feature: {}, feat
 let effectsByName = {};
 let atWillSpells = new Set();
 let noSlotSpells = new Set();
+let raceTraits = [];
+const tooltipMarkdownCache = new Map();
+let tooltipEl = null;
+let tooltipContentEl = null;
+let tooltipAnchor = null;
+let tooltipPinned = false;
 
 const ACTION_TOOLTIP_SPELLS = ['Mage Armor', 'Eldritch Blast'];
 
@@ -586,6 +607,7 @@ const DAMAGE_TYPES = [
 // ── Init ──────────────────────────────────────────────────────────
 async function init() {
   if (!charId) { location.href = '/'; return; }
+  setupTooltipEvents();
   try {
     [char, state, inventory, currency] = await Promise.all([
       API.get(`/characters/${charId}`),
@@ -609,6 +631,11 @@ async function init() {
     }
     if (char.subclass_id && char.class_id) {
       subFeatures = await API.get(`/classes/${char.class_id}/subclasses/${char.subclass_id}/features?level=${char.level}`);
+    }
+
+    if (char.race_id) {
+      const race = await API.get(`/races/${char.race_id}`).catch(() => null);
+      raceTraits = collectNamedEntries(race?.data?.entries || []);
     }
 
     optionalFeatureSelections = char.stat_overrides?.optional_feature_selections || {};
@@ -1351,6 +1378,170 @@ function escapeHtml(s) {
     .replace(/'/g, '&#39;');
 }
 
+function normalizeTooltipMarkdown(text) {
+  let out = String(text || '').replace(/\r\n/g, '\n').trim();
+  if (!out) return '';
+  if (typeof renderTagStringMarkdown === 'function') {
+    out = renderTagStringMarkdown(out);
+  }
+  out = out.replace(/\s+At Higher Levels:\s*/gi, '\n\n### At Higher Levels\n');
+  if (!out.includes('\n') && out.includes(' · ')) {
+    const parts = out.split(/\s+·\s+/).map(p => p.trim()).filter(Boolean);
+    if (parts.length > 1) out = `${parts[0]}\n\n- ${parts.slice(1).join('\n- ')}`;
+  }
+  const split = out.match(/^([^:#\n]{2,60}):\s+([\s\S]+)$/);
+  if (split) {
+    const title = split[1].trim();
+    const body = split[2].trim();
+    if (title.split(/\s+/).length <= 8 && !body.startsWith('### ')) out = `### ${title}\n\n${body}`;
+  }
+  return out;
+}
+
+function renderTooltipMarkdown(raw) {
+  const source = normalizeTooltipMarkdown(raw);
+  if (!source) return '';
+  if (tooltipMarkdownCache.has(source)) return tooltipMarkdownCache.get(source);
+  let html = `<p>${escapeHtml(source)}</p>`;
+  if (window.marked?.parse) {
+    try {
+      html = window.marked.parse(source, {
+        gfm: true,
+        breaks: true,
+        headerIds: false,
+        mangle: false,
+      });
+    } catch (e) {}
+  }
+  if (window.DOMPurify?.sanitize) {
+    html = window.DOMPurify.sanitize(html, {
+      USE_PROFILES: { html: true },
+    });
+  }
+  tooltipMarkdownCache.set(source, html);
+  return html;
+}
+
+function ensureTooltipElement() {
+  if (tooltipEl) return;
+  tooltipEl = document.createElement('div');
+  tooltipEl.className = 'md-tooltip';
+  tooltipEl.hidden = true;
+  tooltipEl.id = 'mdTooltip';
+  tooltipContentEl = document.createElement('div');
+  tooltipContentEl.className = 'md-tooltip-content';
+  tooltipEl.appendChild(tooltipContentEl);
+  document.body.appendChild(tooltipEl);
+}
+
+function positionTooltip(anchor) {
+  if (!tooltipEl || !anchor) return;
+  const rect = anchor.getBoundingClientRect();
+  const margin = 10;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  tooltipEl.style.width = `min(560px, calc(100vw - ${margin * 2}px))`;
+
+  const tipRect = tooltipEl.getBoundingClientRect();
+  const maxLeft = Math.max(margin, vw - tipRect.width - margin);
+  let left = rect.left + rect.width / 2 - tipRect.width / 2;
+  left = Math.min(maxLeft, Math.max(margin, left));
+
+  let top = rect.top - tipRect.height - 10;
+  if (top < margin) top = rect.bottom + 10;
+  top = Math.max(margin, Math.min(top, vh - tipRect.height - margin));
+
+  tooltipEl.style.left = `${Math.round(left)}px`;
+  tooltipEl.style.top = `${Math.round(top)}px`;
+}
+
+function showTooltip(anchor, raw, pin = false) {
+  if (!anchor || !raw) return;
+  ensureTooltipElement();
+  tooltipAnchor = anchor;
+  tooltipPinned = !!pin;
+  tooltipContentEl.innerHTML = renderTooltipMarkdown(raw);
+  tooltipEl.hidden = false;
+  tooltipEl.classList.add('visible');
+  tooltipEl.classList.toggle('pinned', tooltipPinned);
+  positionTooltip(anchor);
+}
+
+function hideTooltip(force = false) {
+  if (!tooltipEl) return;
+  if (tooltipPinned && !force) return;
+  tooltipEl.classList.remove('visible', 'pinned');
+  tooltipEl.hidden = true;
+  tooltipPinned = false;
+  tooltipAnchor = null;
+}
+
+function setupTooltipEvents() {
+  ensureTooltipElement();
+
+  document.addEventListener('mouseover', (event) => {
+    if (tooltipPinned) return;
+    const trigger = event.target.closest('[data-tip]');
+    if (!trigger) return;
+    const tip = trigger.getAttribute('data-tip');
+    if (!tip) return;
+    showTooltip(trigger, tip, false);
+  });
+
+  document.addEventListener('mouseout', (event) => {
+    if (tooltipPinned) return;
+    if (!tooltipAnchor) return;
+    const to = event.relatedTarget;
+    if (to && (tooltipAnchor.contains(to) || tooltipEl.contains(to))) return;
+    hideTooltip();
+  });
+
+  document.addEventListener('focusin', (event) => {
+    if (tooltipPinned) return;
+    const trigger = event.target.closest('[data-tip]');
+    if (!trigger) return;
+    const tip = trigger.getAttribute('data-tip');
+    if (!tip) return;
+    showTooltip(trigger, tip, false);
+  });
+
+  document.addEventListener('focusout', (event) => {
+    if (tooltipPinned) return;
+    if (!tooltipAnchor) return;
+    const next = event.relatedTarget;
+    if (next && (tooltipAnchor.contains(next) || tooltipEl.contains(next))) return;
+    hideTooltip();
+  });
+
+  document.addEventListener('click', (event) => {
+    const trigger = event.target.closest('[data-tip]');
+    if (trigger) {
+      const tip = trigger.getAttribute('data-tip');
+      if (!tip) return;
+      if (tooltipPinned && tooltipAnchor === trigger) {
+        hideTooltip(true);
+      } else {
+        showTooltip(trigger, tip, true);
+      }
+      return;
+    }
+    if (tooltipPinned && tooltipEl && !tooltipEl.contains(event.target)) {
+      hideTooltip(true);
+    }
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') hideTooltip(true);
+  });
+
+  window.addEventListener('resize', () => {
+    if (tooltipEl && !tooltipEl.hidden && tooltipAnchor) positionTooltip(tooltipAnchor);
+  });
+  window.addEventListener('scroll', () => {
+    if (tooltipEl && !tooltipEl.hidden && tooltipAnchor) positionTooltip(tooltipAnchor);
+  }, true);
+}
+
 function extractDamageDice(text) {
   const raw = String(text || '');
   const match = raw.match(/\b\d+d\d+(?:\s*[+\-]\s*\d+)?\b/i);
@@ -1557,14 +1748,59 @@ function firstEntryText(entries) {
   return '';
 }
 
+function collectNamedEntries(node, out = []) {
+  if (!node) return out;
+  if (Array.isArray(node)) {
+    node.forEach(n => collectNamedEntries(n, out));
+    return out;
+  }
+  if (typeof node !== 'object') return out;
+  if (node.name && (Array.isArray(node.entries) || node.entry || node.items)) {
+    out.push(node);
+  }
+  for (const value of Object.values(node)) {
+    if (value && typeof value === 'object') collectNamedEntries(value, out);
+  }
+  return out;
+}
+
+function entriesToTooltipMarkdown(entries, title = '') {
+  const list = Array.isArray(entries) ? entries : (entries ? [entries] : []);
+  if (!list.length) return '';
+  if (typeof renderEntriesMarkdown === 'function') {
+    const body = renderEntriesMarkdown(list).trim();
+    if (!body) return '';
+    return title ? `### ${title}\n\n${body}` : body;
+  }
+  const fallback = toPlainEntryText(list);
+  if (!fallback) return '';
+  return title ? `### ${title}\n\n${fallback}` : fallback;
+}
+
+function buildWeaponTooltipMarkdown(item, hitdc, damage) {
+  const name = String(item?.name || 'Weapon').trim() || 'Weapon';
+  const atk = String(hitdc || '—').trim() || '—';
+  const dmg = String(damage || '—').trim() || '—';
+  const notes = String(item?.notes || '').trim();
+  let md = `### ${escapeHtml(name)}\n\n<div class="weapon-tip-grid"><div class="weapon-tip-col"><div class="weapon-tip-label">Damage</div><div class="weapon-tip-value"><code>${escapeHtml(dmg)}</code></div></div><div class="weapon-tip-col"><div class="weapon-tip-label">Attack Bonus</div><div class="weapon-tip-value"><code>${escapeHtml(atk)}</code></div></div></div>`;
+  if (notes) md += `\n\n#### Notes\n\n${notes}`;
+  return md;
+}
+
 function getSpellTooltip(spell) {
   const detail = spellDetailsById[spell.id] || spell;
-  let text = toPlainEntryText(detail?.data?.entries || detail?.entries || '');
+  const entries = detail?.data?.entries || detail?.entries || [];
+  let text = entriesToTooltipMarkdown(entries, spell.name || 'Spell');
   const hl = detail?.data?.entriesHigherLevel || detail?.entriesHigherLevel;
-  const hlText = toPlainEntryText(hl || '');
-  if (hlText) text = `${text} At Higher Levels: ${hlText}`.trim();
-  if (!text) return `${spell.name}: cast this spell.`;
-  return `${spell.name}: ${text}`;
+  const hlText = entriesToTooltipMarkdown(hl || []);
+  if (hlText) {
+    const hasHigherHeading = /^\s{0,3}#{1,6}\s+At Higher Levels\b/im.test(hlText);
+    text = hasHigherHeading
+      ? `${text}\n\n${hlText}`.trim()
+      : `${text}\n\n### At Higher Levels\n\n${hlText}`.trim();
+  }
+  if (!text) return `### ${spell.name}\n\nCast this spell.`;
+  return text;
 }
 
 function indexSpellDetail(spell) {
@@ -1600,13 +1836,14 @@ function toPlainEntryText(entries) {
 function getTooltipFromFeatureNames(names) {
   const wanted = new Set((names || []).map(n => String(n).toLowerCase()));
   const pool = [
+    ...(raceTraits || []),
     ...(classFeatures || []),
     ...(subFeatures || []),
     ...(selectedOptionalFeaturesResolved() || []),
   ];
   const hit = pool.find(f => wanted.has(String(f.name || '').toLowerCase()));
   if (!hit) return '';
-  const text = toPlainEntryText(hit.entries || hit.data?.entries || []);
+  const text = entriesToTooltipMarkdown(hit.entries || hit.data?.entries || [], hit.name || 'Feature');
   return text || '';
 }
 
@@ -1704,6 +1941,21 @@ function effectRulesText(effect) {
   if (!effect?.modifiers) return '';
   const rules = effect.modifiers.find(m => m.kind === 'rules_text');
   return rules?.value?.text || '';
+}
+
+function isFlattenedRulesText(text) {
+  const raw = String(text || '');
+  if (!raw) return false;
+  return /\blist(?:-[a-z]+)?\b/i.test(raw) || /\bentries\b\s+At Higher Levels\b/i.test(raw);
+}
+
+function effectTooltipText(effect, title = '') {
+  const rules = effectRulesText(effect).trim();
+  if (!rules) return '';
+  if (isFlattenedRulesText(rules)) return '';
+  if (!title) return rules;
+  if (/^\s{0,3}#{1,6}\s+/m.test(rules)) return rules;
+  return `### ${title}\n\n${rules}`;
 }
 
 function effectConditions(effect) {
@@ -2272,7 +2524,7 @@ function renderActions() {
     const ebEffect = getEffectByName('Eldritch Blast') || getEffectForSpell(spellDetailsByName['eldritch blast']);
     const ebBaseParts = effectDamageParts(ebEffect, stats);
     const ebDamage = buildDamageExpressionFromParts(ebBaseParts.length ? ebBaseParts : ['1d10']);
-    const ebTooltip = effectRulesText(ebEffect) || getActionTooltip('eldritch_blast', 'Eldritch Blast');
+    const ebTooltip = effectTooltipText(ebEffect, 'Eldritch Blast') || getActionTooltip('eldritch_blast', 'Eldritch Blast');
     const ebNotes = buildNotesFromEffect(ebEffect);
     buttons.push(spellBtn('⚡ Eldritch Blast', '#50a0dc', false, false, "", ebTooltip, 'attack', {
       range: '120 ft',
@@ -2287,7 +2539,7 @@ function renderActions() {
     // Vampiric Bite (Dhampir / Undead flavor)
     if (char.race_name?.toLowerCase().includes('dhampir') || char.subclass_name?.toLowerCase().includes('undead')) {
       const biteEffect = getEffectByName('Vampiric Bite');
-      const biteTooltip = effectRulesText(biteEffect) || getActionTooltip('vampiric_bite', 'Vampiric Bite');
+      const biteTooltip = effectTooltipText(biteEffect, 'Vampiric Bite') || getActionTooltip('vampiric_bite', 'Vampiric Bite');
       const biteNotes = buildNotesFromEffect(biteEffect);
       buttons.push(spellBtn('🦇 Vampiric Bite', '#cc4040', false, res.bite_used, 'useBite()', biteTooltip, 'attack', {
         range: '5 ft',
@@ -2305,7 +2557,7 @@ function renderActions() {
       const fuUsed = res.form_uses || 0;
       const formActive = !!res.form_active;
       const fodEffect = getEffectByName('Form of Dread');
-      const fodTooltip = effectRulesText(fodEffect) || getActionTooltip('form_of_dread', 'Form of Dread');
+      const fodTooltip = effectTooltipText(fodEffect, 'Form of Dread') || getActionTooltip('form_of_dread', 'Form of Dread');
       const fodNotes = buildNotesFromEffect(fodEffect);
       buttons.push(spellBtn(`💀 Form of Dread (${fuMax - fuUsed}/${fuMax})`, '#9860cc', formActive, !formActive && fuUsed >= fuMax, 'activateForm()', fodTooltip, 'action', { range: 'Self', useAction: true, notes: fodNotes, actionKind: 'feature', actionName: 'Form of Dread' }));
     }
@@ -2313,7 +2565,7 @@ function renderActions() {
     if (hasSelectedFeatureName('Armor of Shadows')) {
       const mageArmorActive = !!res.mage_armor_active;
       const maEffect = getEffectByName('Mage Armor');
-      const maTooltip = effectRulesText(maEffect) || getActionTooltip('mage_armor', 'Mage Armor');
+      const maTooltip = effectTooltipText(maEffect, 'Mage Armor') || getActionTooltip('mage_armor', 'Mage Armor');
       const maNotes = buildNotesFromEffect(maEffect);
       buttons.push(spellBtn('🛡 Mage Armor', '#50a0dc', mageArmorActive, false, 'toggleMageArmor()', maTooltip, 'action', {
         range: 'Self',
@@ -2332,12 +2584,12 @@ function renderActions() {
     const ragesUsed = res.rages_used || 0;
     const raging = !!res.raging;
     const rageEffect = getEffectByName('Rage');
-    const rageTooltip = effectRulesText(rageEffect) || getActionTooltip('rage', 'Rage');
+    const rageTooltip = effectTooltipText(rageEffect, 'Rage') || getActionTooltip('rage', 'Rage');
     const rageNotes = buildNotesFromEffect(rageEffect);
     buttons.push(spellBtn(`⚔ Rage (${rageMax - ragesUsed}/${rageMax})`, '#cc4040', raging, !raging && ragesUsed >= rageMax, 'toggleRage()', rageTooltip, 'bonus', { range: 'Self', notes: rageNotes, actionKind: 'feature', actionName: 'Rage' }));
     if (char.level >= 2) {
       const recklessEffect = getEffectByName('Reckless Attack');
-      const recklessTooltip = effectRulesText(recklessEffect) || getActionTooltip('reckless_attack', 'Reckless Attack');
+      const recklessTooltip = effectTooltipText(recklessEffect, 'Reckless Attack') || getActionTooltip('reckless_attack', 'Reckless Attack');
       const recklessNotes = buildNotesFromEffect(recklessEffect);
       buttons.push(spellBtn('🛡 Reckless Attack', '#cc6040', !!res.reckless, false, 'toggleReckless()', recklessTooltip, 'attack', { range: 'Self', notes: recklessNotes, actionKind: 'feature', actionName: 'Reckless Attack' }));
     }
@@ -2346,7 +2598,7 @@ function renderActions() {
   // ── Fighter ───────────────────────────────────────────────────
   if (cls === 'fighter') {
     const swEffect = getEffectByName('Second Wind');
-    const swTooltip = effectRulesText(swEffect) || getActionTooltip('second_wind', 'Second Wind');
+    const swTooltip = effectTooltipText(swEffect, 'Second Wind') || getActionTooltip('second_wind', 'Second Wind');
     const swNotes = buildNotesFromEffect(swEffect);
     buttons.push(spellBtn('🔄 Second Wind', '#40cc80', false, !!res.second_wind_used, 'useSecondWind()', swTooltip, 'bonus', {
       range: 'Self',
@@ -2361,13 +2613,13 @@ function renderActions() {
       const asMax = char.level >= 17 ? 3 : char.level >= 2 ? 1 : 0;
       const asUsed = res.action_surge_used || 0;
       const asEffect = getEffectByName('Action Surge');
-      const asTooltip = effectRulesText(asEffect) || getActionTooltip('action_surge', 'Action Surge');
+      const asTooltip = effectTooltipText(asEffect, 'Action Surge') || getActionTooltip('action_surge', 'Action Surge');
       const asNotes = buildNotesFromEffect(asEffect);
       buttons.push(spellBtn(`⚡ Action Surge (${asMax - asUsed}/${asMax})`, '#e8c170', false, asUsed >= asMax, 'useActionSurge()', asTooltip, 'action', { range: 'Self', notes: asNotes, actionKind: 'feature', actionName: 'Action Surge' }));
     }
     if (char.level >= 9) {
       const indEffect = getEffectByName('Indomitable');
-      const indTooltip = effectRulesText(indEffect) || getActionTooltip('indomitable', 'Indomitable');
+      const indTooltip = effectTooltipText(indEffect, 'Indomitable') || getActionTooltip('indomitable', 'Indomitable');
       const indNotes = buildNotesFromEffect(indEffect);
       buttons.push(spellBtn('🔁 Indomitable', '#6080cc', false, !!res.indomitable_used, 'useIndomitable()', indTooltip, 'other', { range: 'Self', notes: indNotes, actionKind: 'feature', actionName: 'Indomitable' }));
     }
@@ -2378,22 +2630,22 @@ function renderActions() {
     const kiMax = char.level;
     const kiUsed = res.ki_used || 0;
     const kiEffect = getEffectByName('Ki');
-    const kiTooltip = effectRulesText(kiEffect) || getActionTooltip('ki', 'Ki');
+    const kiTooltip = effectTooltipText(kiEffect, 'Ki') || getActionTooltip('ki', 'Ki');
     const kiNotes = buildNotesFromEffect(kiEffect);
     buttons.push(spellBtn(`✨ Ki (${kiMax - kiUsed}/${kiMax})`, '#e8c170', false, kiUsed >= kiMax, 'useKi(1)', kiTooltip, 'bonus', { range: 'Self', notes: kiNotes, actionKind: 'feature', actionName: 'Ki' }));
     const fobEffect = getEffectByName('Flurry of Blows');
-    const fobTooltip = effectRulesText(fobEffect) || getActionTooltip('flurry_of_blows', 'Flurry of Blows');
+    const fobTooltip = effectTooltipText(fobEffect, 'Flurry of Blows') || getActionTooltip('flurry_of_blows', 'Flurry of Blows');
     const fobNotes = buildNotesFromEffect(fobEffect, kiNotes ? [kiNotes] : []);
     buttons.push(spellBtn('👊 Flurry of Blows', '#cc6040', false, (res.ki_used||0)+2 > kiMax, 'useKi(2)', fobTooltip, 'bonus', { range: 'Melee', notes: fobNotes, actionKind: 'feature', actionName: 'Flurry of Blows' }));
     if (char.level >= 2) {
       const sowEffect = getEffectByName('Step of the Wind');
-      const sowTooltip = effectRulesText(sowEffect) || getActionTooltip('step_of_wind', 'Step of the Wind');
+      const sowTooltip = effectTooltipText(sowEffect, 'Step of the Wind') || getActionTooltip('step_of_wind', 'Step of the Wind');
       const sowNotes = buildNotesFromEffect(sowEffect, kiNotes ? [kiNotes] : []);
       buttons.push(spellBtn('🏃 Step of Wind', '#50a0dc', false, (res.ki_used||0)+1 > kiMax, 'useKi(1)', sowTooltip, 'bonus', { range: 'Self', notes: sowNotes, actionKind: 'feature', actionName: 'Step of the Wind' }));
     }
     if (char.level >= 2) {
       const pdEffect = getEffectByName('Patient Defense');
-      const pdTooltip = effectRulesText(pdEffect) || getActionTooltip('patient_defense', 'Patient Defense');
+      const pdTooltip = effectTooltipText(pdEffect, 'Patient Defense') || getActionTooltip('patient_defense', 'Patient Defense');
       const pdNotes = buildNotesFromEffect(pdEffect, kiNotes ? [kiNotes] : []);
       buttons.push(spellBtn('🛡 Patient Defense', '#9860cc', false, (res.ki_used||0)+1 > kiMax, 'useKi(1)', pdTooltip, 'bonus', { range: 'Self', notes: pdNotes, actionKind: 'feature', actionName: 'Patient Defense' }));
     }
@@ -2403,7 +2655,7 @@ function renderActions() {
   if (cls === 'rogue') {
     const sneak = Math.ceil(char.level / 2);
     const saEffect = getEffectByName('Sneak Attack');
-    const saTooltip = effectRulesText(saEffect) || getActionTooltip('sneak_attack', 'Sneak Attack');
+    const saTooltip = effectTooltipText(saEffect, 'Sneak Attack') || getActionTooltip('sneak_attack', 'Sneak Attack');
     const saNotes = buildNotesFromEffect(saEffect);
     const saActive = isEffectActive('Sneak Attack');
     buttons.push(spellBtn(`🗡 Sneak Attack (${sneak}d6)`, '#cc9040', saActive, false, 'toggleSneakAttack()', saTooltip, 'attack', {
@@ -2416,7 +2668,7 @@ function renderActions() {
     }));
     if (char.level >= 2) {
       const caEffect = getEffectByName('Cunning Action');
-      const caTooltip = effectRulesText(caEffect) || getActionTooltip('cunning_action', 'Cunning Action');
+      const caTooltip = effectTooltipText(caEffect, 'Cunning Action') || getActionTooltip('cunning_action', 'Cunning Action');
       const caNotes = buildNotesFromEffect(caEffect);
       buttons.push(spellBtn('🌪 Cunning Action', '#50a0dc', false, false, `addLog('Cunning Action: Dash, Disengage, or Hide as bonus action')`, caTooltip, 'bonus', { range: 'Self', notes: caNotes, actionKind: 'feature', actionName: 'Cunning Action' }));
     }
@@ -2427,11 +2679,11 @@ function renderActions() {
     const spMax = char.level;
     const spUsed = res.sorcery_points_used || 0;
     const spEffect = getEffectByName('Font of Magic');
-    const spTooltip = effectRulesText(spEffect) || getActionTooltip('sorcery_points', 'Sorcery Points');
+    const spTooltip = effectTooltipText(spEffect, 'Sorcery Points') || getActionTooltip('sorcery_points', 'Sorcery Points');
     const spNotes = buildNotesFromEffect(spEffect);
     buttons.push(spellBtn(`✨ Sorcery Points (${spMax - spUsed}/${spMax})`, '#cc60cc', false, spUsed >= spMax, 'useSorceryPoint(1)', spTooltip, 'other', { range: 'Self', notes: spNotes, actionKind: 'feature', actionName: 'Font of Magic' }));
     const mmEffect = getEffectByName('Metamagic');
-    const mmTooltip = effectRulesText(mmEffect) || getActionTooltip('metamagic', 'Metamagic');
+    const mmTooltip = effectTooltipText(mmEffect, 'Metamagic') || getActionTooltip('metamagic', 'Metamagic');
     const mmNotes = buildNotesFromEffect(mmEffect);
     buttons.push(spellBtn('🔄 Metamagic', '#cc60cc', false, false, `addLog('Metamagic applied')`, mmTooltip, 'other', { range: 'Self', notes: mmNotes, actionKind: 'feature', actionName: 'Metamagic' }));
   }
@@ -2440,12 +2692,12 @@ function renderActions() {
   if (cls === 'paladin') {
     const lohPool = res.lay_on_hands_pool ?? char.level * 5;
     const lohEffect = getEffectByName('Lay on Hands');
-    const lohTooltip = effectRulesText(lohEffect) || getActionTooltip('lay_on_hands', 'Lay on Hands');
+    const lohTooltip = effectTooltipText(lohEffect, 'Lay on Hands') || getActionTooltip('lay_on_hands', 'Lay on Hands');
     const lohNotes = buildNotesFromEffect(lohEffect);
     buttons.push(spellBtn(`🙏 Lay on Hands (${lohPool} HP)`, '#40cc80', false, lohPool <= 0, 'useLayOnHands()', lohTooltip, 'action', { range: 'Touch', notes: lohNotes, actionKind: 'feature', actionName: 'Lay on Hands' }));
     if (char.level >= 2) {
       const smiteEffect = getEffectByName('Divine Smite');
-      const smiteTooltip = effectRulesText(smiteEffect) || getActionTooltip('divine_smite', 'Divine Smite');
+      const smiteTooltip = effectTooltipText(smiteEffect, 'Divine Smite') || getActionTooltip('divine_smite', 'Divine Smite');
       const smiteNotes = buildNotesFromEffect(smiteEffect);
       buttons.push(spellBtn('⚔ Divine Smite', '#e8c170', false, false, `addLog('Divine Smite: expend a spell slot for 2d8 radiant + 1d8 per slot level above 1st')`, smiteTooltip, 'attack', { range: 'Melee', damage: '2d8', notes: smiteNotes, actionKind: 'feature', actionName: 'Divine Smite' }));
     }
@@ -2458,7 +2710,7 @@ function renderActions() {
     const biUsed = res.bardic_inspiration_used || 0;
     const biRemain = Math.max(0, biMax - biUsed);
     const biEffect = getEffectByName('Bardic Inspiration');
-    const biTooltip = effectRulesText(biEffect) || getActionTooltip('bardic_inspiration', 'Bardic Inspiration');
+    const biTooltip = effectTooltipText(biEffect, 'Bardic Inspiration') || getActionTooltip('bardic_inspiration', 'Bardic Inspiration');
     const biNotes = buildNotesFromEffect(biEffect);
     buttons.push(spellBtn(`🎵 Bardic Inspiration (${biRemain}/${biMax} ${biDie})`, '#cc9040', false, biRemain <= 0, 'useBardicInspiration()', biTooltip, 'bonus', { range: '60 ft', notes: biNotes, actionKind: 'feature', actionName: 'Bardic Inspiration' }));
   }
@@ -2469,7 +2721,7 @@ function renderActions() {
     const wcUsed = res.wild_shape_used || 0;
     if (wcMax > 0) {
       const wsEffect = getEffectByName('Wild Shape');
-      const wsTooltip = effectRulesText(wsEffect) || getActionTooltip('wild_shape', 'Wild Shape');
+      const wsTooltip = effectTooltipText(wsEffect, 'Wild Shape') || getActionTooltip('wild_shape', 'Wild Shape');
       const wsNotes = buildNotesFromEffect(wsEffect);
       buttons.push(spellBtn(`🐺 Wild Shape (${wcMax - wcUsed}/${wcMax})`, '#40cc80', !!res.wild_shaped, wcUsed >= wcMax, 'toggleWildShape()', wsTooltip, 'action', { range: 'Self', notes: wsNotes, actionKind: 'feature', actionName: 'Wild Shape' }));
     }
@@ -2481,7 +2733,7 @@ function renderActions() {
       const cdUsed = res.channel_divinity_used || 0;
       const cdMax = char.level >= 18 ? 3 : char.level >= 6 ? 2 : 1;
       const cdEffect = getEffectByName('Channel Divinity');
-      const cdTooltip = effectRulesText(cdEffect) || getActionTooltip('channel_divinity', 'Channel Divinity');
+      const cdTooltip = effectTooltipText(cdEffect, 'Channel Divinity') || getActionTooltip('channel_divinity', 'Channel Divinity');
       const cdNotes = buildNotesFromEffect(cdEffect);
       buttons.push(spellBtn(`✝ Channel Divinity (${cdMax - cdUsed}/${cdMax})`, '#e8c170', false, cdUsed >= cdMax, 'useChannelDivinity()', cdTooltip, 'action', { range: 'Self', notes: cdNotes, actionKind: 'feature', actionName: 'Channel Divinity' }));
     }
@@ -2497,7 +2749,8 @@ function renderActions() {
       const hitdc = Number.isFinite(atkBonus) ? modStr(atkBonus) : '—';
       const dmg = item.weapon_damage || '';
       const notes = item.notes || '';
-      buttons.push(spellBtn(`⚔ ${item.name}`, '#cc6040', false, false, `addLog('Attack: ${escapeAttr(item.name)}')`, item.name, 'attack', {
+      const tooltip = buildWeaponTooltipMarkdown(item, hitdc, dmg || '—');
+      buttons.push(spellBtn(`⚔ ${item.name}`, '#cc6040', false, false, `addLog('Attack: ${escapeAttr(item.name)}')`, tooltip, 'attack', {
         range: '—',
         hitdc,
         damage: dmg,
@@ -2512,13 +2765,13 @@ function renderActions() {
   // ── Generic spellcaster quick-actions ────────────────────────
   if (hasSelectedFeatureName('Protection')) {
     const protEffect = getEffectByName('Protection');
-    const protTooltip = effectRulesText(protEffect) || getActionTooltip('protection', 'Protection');
+    const protTooltip = effectTooltipText(protEffect, 'Protection') || getActionTooltip('protection', 'Protection');
     const protNotes = buildNotesFromEffect(protEffect);
     buttons.push(spellBtn('🛡 Protection (Reaction)', '#6080cc', false, false, `addLog('Protection: impose disadvantage on attack vs ally within 5 ft')`, protTooltip, 'reaction', { range: '5 ft', notes: protNotes, actionKind: 'feature', actionName: 'Protection' }));
   }
   if (hasSelectedFeatureName('Interception')) {
     const intEffect = getEffectByName('Interception');
-    const intTooltip = effectRulesText(intEffect) || getActionTooltip('interception', 'Interception');
+    const intTooltip = effectTooltipText(intEffect, 'Interception') || getActionTooltip('interception', 'Interception');
     const intNotes = buildNotesFromEffect(intEffect);
     buttons.push(spellBtn('🛡 Interception (Reaction)', '#6080cc', false, false, `addLog('Interception: reduce damage by 1d10 + PB')`, intTooltip, 'reaction', { range: '5 ft', notes: intNotes, actionKind: 'feature', actionName: 'Interception' }));
   }
@@ -2553,7 +2806,7 @@ function renderActions() {
       const isHeal = isHealingSpell(sp.name);
       const detail = spellDetailsById[sp.id] || sp;
       const dmgExpr = isHex ? '' : buildDamageExpressionFromParts(isHeal ? effectHealingParts(spellEffect, stats) : effectDamageParts(spellEffect, stats));
-      const tooltip = effectRulesText(spellEffect) || getSpellTooltip(sp);
+      const tooltip = getSpellTooltip(sp) || effectTooltipText(spellEffect, sp.name);
       const notes = buildNotesFromEffect(spellEffect, noteParts);
       buttons.push(spellBtn(`${isConc ? '👁 ' : ''}${sp.name}`, isConc ? '#b48c3c' : '#6080cc', isActive, noSlots && !isActive, `quickCast(${sp.id})`, tooltip, inferSpellActionType(sp), {
         range: sp.range_text || '—',
@@ -3491,7 +3744,7 @@ function renderSpells() {
       const isHeal = isHealingSpell(sp.name);
       const spellEffect = getEffectForSpell(detail);
       const effectMeta = spellEffect?.meta || {};
-      const tooltip = effectRulesText(spellEffect) || getSpellTooltip(detail);
+      const tooltip = getSpellTooltip(detail) || effectTooltipText(spellEffect, sp.name);
       const hitdc = (effectMeta.saving_throw && effectMeta.saving_throw.length)
         ? `DC ${stats.spellDC}`
         : (effectMeta.spell_attack && effectMeta.spell_attack.length)
@@ -3677,10 +3930,9 @@ function renderFeatures() {
 
   // Async: load race traits
   if (char.race_id) {
-    API.get(`/races/${char.race_id}`).then(r => {
+    const renderTraits = (traits) => {
       const el = document.getElementById('raceTraitsFeatures');
       if (!el) return;
-      const traits = (r.data?.entries || []).filter(e => typeof e === 'object' && e.name);
       el.innerHTML = traits.map((t, i) => {
         const bodyId = `race_trait_${char.race_id}_${i}`;
         return `
@@ -3692,7 +3944,16 @@ function renderFeatures() {
         </div>
       `;
       }).join('') || `<div style="font-size:12px;color:var(--dim)">No traits data available.</div>`;
-    }).catch(()=>{});
+    };
+
+    if (raceTraits.length) {
+      renderTraits(raceTraits);
+    } else {
+      API.get(`/races/${char.race_id}`).then(r => {
+        raceTraits = collectNamedEntries(r?.data?.entries || []);
+        renderTraits(raceTraits);
+      }).catch(()=>{});
+    }
   }
 
   // Async: load feat details

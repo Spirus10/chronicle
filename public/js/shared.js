@@ -81,6 +81,178 @@ function renderTagString(text) {
   return text.replace(/\{@(\w+) ([^{}]*)\}/g, (_, tag, content) => renderTag(tag, content));
 }
 
+function tagLabel(content) {
+  const raw = String(content || '');
+  return raw.split('|')[0]?.trim() || raw.trim();
+}
+
+function renderTagMarkdown(tag, content) {
+  const t = String(tag || '').toLowerCase();
+  const label = tagLabel(content);
+  switch (t) {
+    case 'i':
+    case 'italic':
+      return `*${label}*`;
+    case 'b':
+    case 'bold':
+      return `**${label}**`;
+    case 'damage':
+    case 'dice':
+      return `\`${label}\``;
+    case 'scaledamage':
+    case 'scaledice': {
+      const parts = String(content || '').split('|').map(p => p.trim()).filter(Boolean);
+      const base = parts[0] || label;
+      const range = parts[1] || '';
+      const step = parts[2] || '';
+      const suffix = range && step && step !== base ? ` (scales ${range}: +${step})` : '';
+      return `\`${base}\`${suffix}`;
+    }
+    case 'dc':
+      return `DC ${label}`;
+    case 'hit': {
+      const hit = label.startsWith('+') || label.startsWith('-') ? label : `+${label}`;
+      return `\`${hit}\``;
+    }
+    case 'chance':
+      return `${label}%`;
+    case 'condition':
+      return `<span class="md-tag md-tag-condition">${label}</span>`;
+    case 'status':
+      return `<span class="md-tag md-tag-status">${label}</span>`;
+    case 'skill':
+      return `<span class="md-tag md-tag-skill">${label}</span>`;
+    case 'note':
+      return `*${label}*`;
+    case 'recharge':
+      return `(Recharge ${label})`;
+    case 'h':
+      return '';
+    case 'atk':
+    case 'action':
+    case 'sense':
+    case 'quickref':
+    case 'book':
+    case 'filter':
+    case 'link':
+    case 'spell':
+    case 'creature':
+    case 'item':
+    case 'race':
+    case 'deity':
+    case 'language':
+    case 'class':
+    case 'classfeature':
+    case 'optfeature':
+    case 'feat':
+    case 'background':
+    case 'adventure':
+    case 'table':
+    case 'object':
+    case 'deck':
+    case 'variantrule':
+    case 'itemproperty':
+    case 'color':
+      return label;
+    default:
+      return label;
+  }
+}
+
+function renderTagStringMarkdown(text) {
+  if (!text || typeof text !== 'string') return text || '';
+  return text.replace(/\{@([A-Za-z]+) ([^{}]*)\}/g, (_, tag, content) => renderTagMarkdown(tag, content));
+}
+
+function markdownTableFromEntry(entry) {
+  const headers = (entry.colLabels || []).map(h => renderTagStringMarkdown(String(h || '')));
+  const rows = (entry.rows || []).map(row => {
+    const cells = (row || []).map(cell => {
+      if (typeof cell === 'string') return renderTagStringMarkdown(cell);
+      if (cell?.roll) {
+        const min = cell.roll.min ?? '';
+        const max = cell.roll.max ?? '';
+        if (min === max) return String(min);
+        return `${min}-${max}`;
+      }
+      return renderTagStringMarkdown(String(cell ?? ''));
+    });
+    return `| ${cells.join(' | ')} |`;
+  });
+  if (!headers.length) return rows.join('\n');
+  const divider = `| ${headers.map(() => '---').join(' | ')} |`;
+  return [`| ${headers.join(' | ')} |`, divider, ...rows].join('\n');
+}
+
+function renderEntryMarkdown(entry, depth = 0) {
+  if (typeof entry === 'string') return renderTagStringMarkdown(entry);
+  if (!entry || typeof entry !== 'object') return '';
+
+  switch (entry.type) {
+    case 'entries': {
+      const title = entry.name
+        ? `${'#'.repeat(Math.min(6, 3 + depth))} ${renderTagStringMarkdown(String(entry.name))}\n\n`
+        : '';
+      const body = renderEntriesMarkdown(entry.entries || [], depth + 1);
+      return `${title}${body}`.trim();
+    }
+    case 'list': {
+      const items = (entry.items || []).map(item => {
+        if (typeof item === 'string') return `- ${renderTagStringMarkdown(item)}`;
+        if (item?.type === 'item') {
+          const name = item.name ? `**${renderTagStringMarkdown(String(item.name))}.** ` : '';
+          const body = renderEntriesMarkdown(item.entries || [], depth + 1).replace(/\n+/g, ' ').trim();
+          return `- ${name}${body}`.trim();
+        }
+        return `- ${renderEntryMarkdown(item, depth + 1).replace(/\n+/g, ' ').trim()}`;
+      }).filter(Boolean);
+      return items.join('\n');
+    }
+    case 'table':
+      return markdownTableFromEntry(entry);
+    case 'inset':
+    case 'insetReadaloud': {
+      const title = entry.name ? `> **${renderTagStringMarkdown(String(entry.name))}**\n>\n` : '';
+      const body = renderEntriesMarkdown(entry.entries || [], depth + 1)
+        .split('\n')
+        .map(line => line ? `> ${line}` : '>')
+        .join('\n');
+      return `${title}${body}`.trim();
+    }
+    case 'abilityDc':
+      return `**Spell save DC** = 8 + your proficiency bonus + your ${(entry.attributes || []).join('/') || '?'} modifier`;
+    case 'abilityAttackMod':
+      return `**Spell attack modifier** = your proficiency bonus + your ${(entry.attributes || []).join('/') || '?'} modifier`;
+    case 'refOptionalfeature':
+      return `See: ${renderTagStringMarkdown(String(entry.optionalfeature || ''))}`;
+    case 'refClassFeature':
+      return `See: ${renderTagStringMarkdown(String(entry.classFeature || ''))}`;
+    case 'options':
+      return renderEntriesMarkdown(entry.entries || [], depth + 1);
+    case 'quote': {
+      const quoted = (entry.entries || [])
+        .map(line => renderTagStringMarkdown(String(line || '')))
+        .join(' ')
+        .trim();
+      const by = entry.by ? `\n>\n> - ${renderTagStringMarkdown(String(entry.by))}` : '';
+      return `> ${quoted}${by}`.trim();
+    }
+    default:
+      if (entry.entries) return renderEntriesMarkdown(entry.entries, depth + 1);
+      return '';
+  }
+}
+
+function renderEntriesMarkdown(entries, depth = 0) {
+  if (!entries || !Array.isArray(entries)) return '';
+  return entries
+    .map(entry => renderEntryMarkdown(entry, depth))
+    .filter(Boolean)
+    .join('\n\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 // Render a 5e.tools entries array to HTML
 function renderEntries(entries, depth = 0) {
   if (!entries || !Array.isArray(entries)) return '';
