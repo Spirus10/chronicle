@@ -128,6 +128,22 @@ function migrate() {
       UNIQUE(name, source)
     );
 
+    -- ── EFFECT DEFINITIONS ───────────────────────────────────────
+
+    CREATE TABLE IF NOT EXISTS effect_definitions (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      name          TEXT NOT NULL,
+      source_type   TEXT NOT NULL,
+      source_id     INTEGER NOT NULL,
+      scope         TEXT NOT NULL,
+      kind          TEXT NOT NULL,
+      priority      INTEGER NOT NULL DEFAULT 0,
+      duration_type TEXT NOT NULL,
+      tags_json     TEXT NOT NULL DEFAULT '[]',
+      effect_json   TEXT NOT NULL,
+      UNIQUE(source_type, source_id, name)
+    );
+
     -- ── USER DATA ─────────────────────────────────────────────────
 
     CREATE TABLE IF NOT EXISTS characters (
@@ -195,9 +211,23 @@ function migrate() {
       value_gp     REAL,
       equipped     INTEGER NOT NULL DEFAULT 0,
       item_type    TEXT NOT NULL DEFAULT 'misc',
+      weapon_damage TEXT,
+      weapon_atk_bonus INTEGER,
       notes        TEXT NOT NULL DEFAULT '',
       sort_order   INTEGER NOT NULL DEFAULT 0,
       created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS weapons (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      name         TEXT NOT NULL,
+      source       TEXT NOT NULL,
+      category     TEXT,
+      damage_dice  TEXT,
+      damage_type  TEXT,
+      properties_json TEXT,
+      data_json    TEXT NOT NULL,
+      UNIQUE(name, source)
     );
 
     CREATE TABLE IF NOT EXISTS currency (
@@ -216,6 +246,14 @@ function migrate() {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
+
+  const inventoryCols = db.prepare('PRAGMA table_info(inventory)').all().map(c => c.name);
+  if (!inventoryCols.includes('weapon_damage')) {
+    db.exec('ALTER TABLE inventory ADD COLUMN weapon_damage TEXT');
+  }
+  if (!inventoryCols.includes('weapon_atk_bonus')) {
+    db.exec('ALTER TABLE inventory ADD COLUMN weapon_atk_bonus INTEGER');
+  }
 }
 
 migrate();

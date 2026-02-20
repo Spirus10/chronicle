@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const db = require('./db');
+const seedEffectDefinitions = require('./effects/seed-effects');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -59,6 +60,16 @@ async function checkAndSeed() {
   } else {
     const counts = db.prepare('SELECT COUNT(*) as n FROM classes').get().n;
     console.log(`Database already seeded (${counts} classes). Skipping seed.`);
+  }
+
+  const effectCount = db.prepare('SELECT COUNT(*) as n FROM effect_definitions').get().n;
+  if (effectCount === 0) {
+    console.log('Effect definitions missing. Seeding effect definitions...');
+    try {
+      await seedEffectDefinitions({ allSources: true });
+    } catch (err) {
+      console.error('Effect definition seed failed:', err.message);
+    }
   }
 }
 

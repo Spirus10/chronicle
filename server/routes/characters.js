@@ -1,6 +1,7 @@
 'use strict';
 const express = require('express');
 const db = require('../db');
+const { collectModifiers } = require('../effects/engine');
 const router = express.Router();
 
 // ── Helpers ────────────────────────────────────────────────────
@@ -56,6 +57,110 @@ function parseState(row) {
     log: JSON.parse(row.log_json || '[]'),
     updated_at: row.updated_at,
   };
+}
+
+function parseEffectRow(row) {
+  if (!row) return null;
+  const effect = JSON.parse(row.effect_json || '{}');
+  return {
+    id: row.id,
+    name: row.name,
+    source_type: row.source_type,
+    source_id: row.source_id,
+    scope: row.scope,
+    kind: row.kind,
+    priority: row.priority,
+    duration_type: row.duration_type,
+    tags: JSON.parse(row.tags_json || '[]'),
+    effect,
+  };
+}
+
+function fetchEffectDefinitions(sourceType, sourceIds) {
+  const ids = [...new Set((sourceIds || []).filter(n => Number.isInteger(n) && n > 0))];
+  if (!ids.length) return [];
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = db.prepare(`
+    SELECT id, name, source_type, source_id, scope, kind, priority, duration_type, tags_json, effect_json
+    FROM effect_definitions
+    WHERE source_type = ? AND source_id IN (${placeholders})
+  `).all(sourceType, ...ids);
+  return rows.map(parseEffectRow).filter(Boolean);
+}
+
+function fetchEffectDefinitionsByName(sourceType, names) {
+  const list = [...new Set((names || []).map(n => String(n || '').trim()).filter(Boolean))];
+  if (!list.length) return [];
+  const placeholders = list.map(() => '?').join(',');
+  const rows = db.prepare(`
+    SELECT id, name, source_type, source_id, scope, kind, priority, duration_type, tags_json, effect_json
+    FROM effect_definitions
+    WHERE source_type = ? AND name IN (${placeholders})
+  `).all(sourceType, ...list);
+  return rows.map(parseEffectRow).filter(Boolean);
+}
+
+function loadCharacterEffectDefinitions(char) {
+  if (!char) return [];
+  const effects = [];
+
+  if (char.class_id) {
+    const classFeatureIds = db.prepare(`
+      SELECT id FROM class_features
+      WHERE class_id = ? AND level <= ? AND is_subclass_feature = 0
+    `).all(char.class_id, char.level).map(r => r.id);
+    effects.push(...fetchEffectDefinitions('class_feature', classFeatureIds));
+  }
+
+  if (char.subclass_id) {
+    const subclassFeatureIds = db.prepare(`
+      SELECT id FROM class_features
+      WHERE subclass_id = ? AND level <= ? AND is_subclass_feature = 1
+    `).all(char.subclass_id, char.level).map(r => r.id);
+    effects.push(...fetchEffectDefinitions('class_feature', subclassFeatureIds));
+  }
+
+  if (char.race_id) {
+    effects.push(...fetchEffectDefinitions('race', [char.race_id]));
+  }
+
+  const featIds = Array.isArray(char.feats) ? char.feats.map(id => parseInt(id, 10)) : [];
+  effects.push(...fetchEffectDefinitions('feat', featIds));
+
+  const spellIds = new Set();
+  if (Array.isArray(char.spells_known)) {
+    char.spells_known.forEach(id => spellIds.add(parseInt(id, 10)));
+  }
+  if (Array.isArray(char.spellbook)) {
+    char.spellbook.forEach(id => spellIds.add(parseInt(id, 10)));
+  }
+  effects.push(...fetchEffectDefinitions('spell', [...spellIds]));
+
+  const weaponNames = db.prepare(`
+    SELECT name FROM inventory WHERE character_id = ? AND item_type = 'weapon'
+  `).all(char.id).map(r => r.name);
+  effects.push(...fetchEffectDefinitionsByName('weapon', weaponNames));
+
+  return effects;
+}
+
+function shouldIncludeEffect(effect, filter, activeEffects) {
+  if (!filter || !effect) return true;
+  if (effect.tags && Array.isArray(effect.tags) && effect.tags.includes('requires_toggle')) {
+    const activeNames = (activeEffects || []).map(e => String(e?.name || '').toLowerCase());
+    if (!activeNames.includes(String(effect.name || '').toLowerCase())) return false;
+  }
+  if (filter.action_type === 'spell') {
+    const sourceType = effect.source?.type;
+    if (sourceType === 'spell') return true;
+    const conditions = Array.isArray(effect.conditions) ? effect.conditions : [];
+    const actionConditionTypes = new Set(['action_name_is', 'spell_name_is', 'action_has_tag']);
+    return conditions.some(c => actionConditionTypes.has(c?.type));
+  }
+  if (filter.action_type === 'weapon') {
+    if (effect.source?.type === 'weapon') return false;
+  }
+  return true;
 }
 
 function enrichCharacter(char) {
@@ -443,6 +548,69 @@ router.put('/:id/state', (req, res) => {
   res.json(parseState(row));
 });
 
+// ── GET /api/characters/:id/effects ───────────────────────────
+router.get('/:id/effects', (req, res) => {
+  const row = db.prepare('SELECT * FROM characters WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Character not found' });
+
+  const char = enrichCharacter(parseChar(row));
+  const stateRow = db.prepare('SELECT * FROM character_state WHERE character_id = ?').get(req.params.id);
+  const state = parseState(stateRow) || { active_effects: [] };
+
+  const effects = loadCharacterEffectDefinitions(char).map(e => e.effect);
+  const activeEffects = Array.isArray(state.active_effects) ? state.active_effects : [];
+
+  res.json({
+    character_id: char.id,
+    effects,
+    active_effects: activeEffects,
+  });
+});
+
+// ── POST /api/characters/:id/effects/resolve ──────────────────
+router.post('/:id/effects/resolve', (req, res) => {
+  const row = db.prepare('SELECT * FROM characters WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Character not found' });
+
+  const char = enrichCharacter(parseChar(row));
+  const stateRow = db.prepare('SELECT * FROM character_state WHERE character_id = ?').get(req.params.id);
+  const state = parseState(stateRow) || { active_effects: [] };
+
+  const baseContext = req.body?.context || {};
+  const actorTags = [];
+  if (char.class_name) actorTags.push(`class:${String(char.class_name).toLowerCase()}`);
+  if (char.subclass_name) actorTags.push(`subclass:${String(char.subclass_name).toLowerCase()}`);
+
+  const context = {
+    ...baseContext,
+    actor: {
+      ...baseContext.actor,
+      id: char.id,
+      level: char.level,
+      ability_scores: char.ability_scores,
+      spellcasting_ability: char.spellcasting_ability,
+      tags: [...(baseContext.actor?.tags || []), ...actorTags],
+    },
+    state: {
+      ...baseContext.state,
+      concentration: state.concentration,
+    },
+  };
+
+  const effects = loadCharacterEffectDefinitions(char).map(e => e.effect);
+  const activeOverride = Array.isArray(req.body?.active_effects) ? req.body.active_effects : null;
+  const activeEffects = activeOverride || (Array.isArray(state.active_effects) ? state.active_effects : []);
+  const filter = req.body?.filter || null;
+  const combined = [...effects, ...activeEffects].filter(effect => shouldIncludeEffect(effect, filter, activeEffects));
+
+  const { applicable, modifiers } = collectModifiers(combined, context);
+  res.json({
+    character_id: char.id,
+    applicable_effects: applicable,
+    modifiers,
+  });
+});
+
 // ── GET /api/characters/:id/inventory ─────────────────────────
 router.get('/:id/inventory', (req, res) => {
   const rows = db.prepare(`
@@ -453,16 +621,16 @@ router.get('/:id/inventory', (req, res) => {
 
 // ── POST /api/characters/:id/inventory ────────────────────────
 router.post('/:id/inventory', (req, res) => {
-  const { name, quantity=1, weight, value_gp, equipped=false, item_type='misc', notes='' } = req.body;
+  const { name, quantity=1, weight, value_gp, equipped=false, item_type='misc', notes='', weapon_damage = null, weapon_atk_bonus = null } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
 
   const maxOrder = db.prepare('SELECT MAX(sort_order) as m FROM inventory WHERE character_id = ?').get(req.params.id);
   const sortOrder = (maxOrder?.m ?? -1) + 1;
 
   const result = db.prepare(`
-    INSERT INTO inventory (character_id, name, quantity, weight, value_gp, equipped, item_type, notes, sort_order)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(req.params.id, name, quantity, weight ?? null, value_gp ?? null, equipped ? 1 : 0, item_type, notes, sortOrder);
+    INSERT INTO inventory (character_id, name, quantity, weight, value_gp, equipped, item_type, weapon_damage, weapon_atk_bonus, notes, sort_order)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(req.params.id, name, quantity, weight ?? null, value_gp ?? null, equipped ? 1 : 0, item_type, weapon_damage, weapon_atk_bonus, notes, sortOrder);
 
   const row = db.prepare('SELECT * FROM inventory WHERE id = ?').get(result.lastInsertRowid);
   res.status(201).json(row);
@@ -473,14 +641,20 @@ router.put('/:id/inventory/:itemId', (req, res) => {
   const existing = db.prepare('SELECT id FROM inventory WHERE id = ? AND character_id = ?').get(req.params.itemId, req.params.id);
   if (!existing) return res.status(404).json({ error: 'Item not found' });
 
-  const allowed = ['name','quantity','weight','value_gp','equipped','item_type','notes','sort_order'];
+  const allowed = ['name','quantity','weight','value_gp','equipped','item_type','weapon_damage','weapon_atk_bonus','notes','sort_order'];
   const updates = [];
   const params = { id: req.params.itemId };
 
   for (const field of allowed) {
     if (req.body[field] === undefined) continue;
     updates.push(`${field} = @${field}`);
-    params[field] = field === 'equipped' ? (req.body[field] ? 1 : 0) : req.body[field];
+    if (field === 'equipped') {
+      params[field] = req.body[field] ? 1 : 0;
+    } else if (field === 'weapon_atk_bonus') {
+      params[field] = req.body[field] === '' || req.body[field] === null ? null : req.body[field];
+    } else {
+      params[field] = req.body[field];
+    }
   }
 
   if (!updates.length) return res.status(400).json({ error: 'No fields to update' });

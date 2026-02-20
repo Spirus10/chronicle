@@ -195,6 +195,25 @@ let raceData = null, bgData = null;
 
 const STANDARD_LANGUAGES = ['common','dwarvish','elvish','giant','gnomish','goblin','halfling','orc'];
 const EXOTIC_LANGUAGES = ['abyssal','celestial','draconic','deep speech','infernal','primordial','sylvan','undercommon'];
+const ARTISAN_TOOLS = [
+  "alchemist's supplies","brewer's supplies","calligrapher's supplies","carpenter's tools",
+  "cartographer's tools","cobbler's tools","cook's utensils","glassblower's tools",
+  "jeweler's tools","leatherworker's tools","mason's tools","painter's supplies",
+  "potter's tools","smith's tools","tinker's tools","weaver's tools","woodcarver's tools",
+];
+const MUSICAL_INSTRUMENTS = [
+  'bagpipes','drum','dulcimer','flute','lute','lyre','horn','pan flute','shawm','viol',
+];
+const GAMING_SETS = [
+  'dice set','dragonchess set','playing card set','three-dragon ante set',
+];
+const TOOL_PROFICIENCIES = [
+  ...ARTISAN_TOOLS,
+  ...MUSICAL_INSTRUMENTS,
+  ...GAMING_SETS,
+  "disguise kit","forgery kit","herbalism kit","navigator's tools","poisoner's kit",
+  "thieves' tools","vehicles (land)","vehicles (water)","vehicles (air)",
+];
 
 // ── Init ──────────────────────────────────────────────────────────
 async function init() {
@@ -450,15 +469,53 @@ function normalizeToken(k) {
   return String(k || '').toLowerCase().trim();
 }
 
+function toolListForKey(key) {
+  switch (key) {
+    case 'anyartisanstool':
+      return ARTISAN_TOOLS.slice();
+    case 'anymusicalinstrument':
+      return MUSICAL_INSTRUMENTS.slice();
+    case 'anygamingset':
+      return GAMING_SETS.slice();
+    case 'anytool':
+    case 'anytools':
+      return TOOL_PROFICIENCIES.slice();
+    default:
+      return null;
+  }
+}
+
 function parseProficiencySpec(specList, kind, prefix) {
   const fixed = [];
   const choiceGroups = [];
   const list = Array.isArray(specList) ? specList : [];
 
   for (const obj of list) {
+    if (typeof obj === 'string') {
+      fixed.push(kind === 'skill' ? normalizeSkillKey(obj) : normalizeToken(obj));
+      continue;
+    }
     if (!obj || typeof obj !== 'object') continue;
     for (const [rawKey, val] of Object.entries(obj)) {
       const key = normalizeToken(rawKey);
+      if (kind === 'tool') {
+        const toolList = toolListForKey(key);
+        if (toolList) {
+          const count = parseInt(val, 10) || 1;
+          for (let i = 0; i < count; i++) {
+            choiceGroups.push({ id: `${prefix}_tool_${choiceGroups.length}`, from: toolList, count: 1, amount: 1 });
+          }
+          continue;
+        }
+      }
+      if (kind === 'skill' && key === 'anyskill') {
+        const count = parseInt(val, 10) || 1;
+        const all = SKILLS.map(s => s.key);
+        for (let i = 0; i < count; i++) {
+          choiceGroups.push({ id: `${prefix}_skill_${choiceGroups.length}`, from: all, count: 1, amount: 1 });
+        }
+        continue;
+      }
       if (key === 'choose' || key === 'any' || key === 'anystandard' || key === 'anyexotic') continue;
       if (val === true || val === 1) {
         fixed.push(kind === 'skill' ? normalizeSkillKey(key) : key);
@@ -479,13 +536,13 @@ function parseProficiencySpec(specList, kind, prefix) {
       continue;
     }
 
-    if (obj.anyStandard) {
+    if (obj.anyStandard && kind === 'language') {
       const count = parseInt(obj.anyStandard, 10) || 1;
       for (let i = 0; i < count; i++) {
         choiceGroups.push({ id: `${prefix}_std_${choiceGroups.length}`, from: STANDARD_LANGUAGES.slice(), count: 1, amount: 1 });
       }
     }
-    if (obj.anyExotic) {
+    if (obj.anyExotic && kind === 'language') {
       const count = parseInt(obj.anyExotic, 10) || 1;
       for (let i = 0; i < count; i++) {
         choiceGroups.push({ id: `${prefix}_exo_${choiceGroups.length}`, from: EXOTIC_LANGUAGES.slice(), count: 1, amount: 1 });
@@ -493,9 +550,14 @@ function parseProficiencySpec(specList, kind, prefix) {
     }
     if (obj.any) {
       const count = parseInt(obj.any, 10) || 1;
-      const all = [...STANDARD_LANGUAGES, ...EXOTIC_LANGUAGES];
-      for (let i = 0; i < count; i++) {
-        choiceGroups.push({ id: `${prefix}_any_${choiceGroups.length}`, from: all, count: 1, amount: 1 });
+      let all = [];
+      if (kind === 'language') all = [...STANDARD_LANGUAGES, ...EXOTIC_LANGUAGES];
+      if (kind === 'tool') all = TOOL_PROFICIENCIES.slice();
+      if (kind === 'skill') all = SKILLS.map(s => s.key);
+      if (all.length) {
+        for (let i = 0; i < count; i++) {
+          choiceGroups.push({ id: `${prefix}_any_${choiceGroups.length}`, from: all, count: 1, amount: 1 });
+        }
       }
     }
 

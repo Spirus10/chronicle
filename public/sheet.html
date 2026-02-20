@@ -427,7 +427,7 @@ body::before{content:'';position:fixed;inset:0;background:
     <div class="modal-row">
       <div class="modal-field">
         <label>Type</label>
-        <select id="itemType">
+        <select id="itemType" onchange="toggleWeaponFields(this.value)">
           <option>misc</option>
           <option>weapon</option>
           <option>armor</option>
@@ -450,6 +450,16 @@ body::before{content:'';position:fixed;inset:0;background:
       <div class="modal-field">
         <label>Value (GP)</label>
         <input type="number" id="itemValue" min="0" step="0.01" placeholder="Optional">
+      </div>
+    </div>
+    <div class="modal-row weapon-fields hidden" id="weaponFields">
+      <div class="modal-field">
+        <label>Weapon Damage</label>
+        <input type="text" id="itemWeaponDamage" placeholder="e.g. 1d8">
+      </div>
+      <div class="modal-field">
+        <label>Attack Bonus</label>
+        <input type="number" id="itemWeaponAtk" step="1" placeholder="e.g. 6">
       </div>
     </div>
     <div class="modal-field">
@@ -486,6 +496,11 @@ let collapseState = {};
 let featureChoiceSelections = {};
 let allOptionalFeatures = [];
 let optionalFeaturesByRef = {};
+let effectDefinitions = [];
+let effectsBySource = { spell: {}, class_feature: {}, optional_feature: {}, feat: {}, race: {} };
+let effectsByName = {};
+let atWillSpells = new Set();
+let noSlotSpells = new Set();
 
 const ACTION_TOOLTIP_SPELLS = ['Mage Armor', 'Eldritch Blast'];
 
@@ -578,6 +593,12 @@ async function init() {
       API.get(`/characters/${charId}/inventory`),
       API.get(`/characters/${charId}/currency`),
     ]);
+
+    const effectsPayload = await API.get(`/characters/${charId}/effects`).catch(() => null);
+    if (effectsPayload?.effects) {
+      effectDefinitions = effectsPayload.effects;
+      indexEffectDefinitions(effectDefinitions);
+    }
 
     // Load class data
     if (char.class_id) {
@@ -1403,6 +1424,7 @@ function isEffectActive(name) {
   return (state.active_effects || []).some(e => String(e?.name || '').toLowerCase() === n);
 }
 
+
 function isHexActive() {
   return String(state.concentration || '').toLowerCase() === 'hex';
 }
@@ -1424,10 +1446,6 @@ function getDamageModifiers(label, opts = {}) {
   }
   if (!opts.isHealing && isHexActive()) {
     mods.push({ label: 'Hex', expr: '1d6' });
-  }
-  if (opts.isHealing) {
-    const mod = abilityMod(char.ability_scores?.[char.spellcasting_ability] || 10);
-    if (mod) mods.push({ label: 'Spell Mod', expr: String(mod) });
   }
   return mods;
 }
@@ -1470,12 +1488,15 @@ function rollDiceExpression(expr) {
 }
 
 function rollDamage(label, expr, isHealing = false) {
+  const opts = typeof isHealing === 'object'
+    ? { isHealing: !!isHealing.isHealing, skipModifiers: !!isHealing.skipModifiers, applyHealing: !!isHealing.applyHealing }
+    : { isHealing: !!isHealing, skipModifiers: false, applyHealing: false };
   const baseExpr = String(expr || '').trim();
   if (!baseExpr) {
     toast('No damage dice to roll.', 'warn');
     return;
   }
-  const modifiers = getDamageModifiers(label, { isHealing });
+  const modifiers = opts.skipModifiers ? [] : getDamageModifiers(label, { isHealing: opts.isHealing });
   const parts = [{ label: 'Base', expr: baseExpr }];
   for (const mod of modifiers) {
     if (mod?.expr) parts.push(mod);
@@ -1492,10 +1513,12 @@ function rollDamage(label, expr, isHealing = false) {
     toast('No damage dice to roll.', 'warn');
     return;
   }
-  const displayExpr = buildDamageExpression(label, baseExpr, { isHealing });
+  const displayExpr = buildDamageExpression(label, baseExpr, { isHealing: opts.isHealing });
   addLog(`${label}: ${detail.join(' · ')} => ${total}`);
   toast(`${label}: ${displayExpr} = ${total}`, 'info');
+  if (opts.applyHealing) applyHeal(total);
   renderActionEffects();
+  return total;
 }
 
 // Override any malformed parser earlier in file
@@ -1632,6 +1655,250 @@ function getActionTooltip(key, fallbackLabel = '') {
   const fromFeatures = getTooltipFromFeatureNames(names);
   if (fromFeatures) return fromFeatures;
   return fallbackLabel;
+}
+
+function indexEffectDefinitions(effects) {
+  effectsBySource = { spell: {}, class_feature: {}, optional_feature: {}, feat: {}, race: {} };
+  effectsByName = {};
+  atWillSpells = new Set();
+  noSlotSpells = new Set();
+  (effects || []).forEach(effect => {
+    if (!effect) return;
+    const source = effect.source || {};
+    if (source.type && source.id !== undefined && source.id !== null) {
+      if (!effectsBySource[source.type]) effectsBySource[source.type] = {};
+      effectsBySource[source.type][source.id] = effect;
+    }
+    if (effect.name) effectsByName[String(effect.name).toLowerCase()] = effect;
+    (effect.modifiers || []).forEach(mod => {
+      if (!mod?.value?.spell) return;
+      const key = String(mod.value.spell).toLowerCase();
+      if (mod.kind === 'cast_at_will') atWillSpells.add(key);
+      if (mod.kind === 'no_slot') noSlotSpells.add(key);
+      if (mod.kind === 'grant_spell' && mod.tags?.includes('spell_at_will')) atWillSpells.add(key);
+    });
+  });
+}
+
+function isSpellAtWill(name) {
+  return atWillSpells.has(String(name || '').toLowerCase());
+}
+
+function isSpellNoSlot(name) {
+  const key = String(name || '').toLowerCase();
+  return noSlotSpells.has(key) || atWillSpells.has(key);
+}
+
+function getEffectForSpell(spell) {
+  if (!spell) return null;
+  if (spell.id !== undefined && effectsBySource.spell?.[spell.id]) return effectsBySource.spell[spell.id];
+  const name = String(spell.name || '').toLowerCase();
+  return effectsByName[name] || null;
+}
+
+function getEffectByName(name) {
+  return effectsByName[String(name || '').toLowerCase()] || null;
+}
+
+function effectRulesText(effect) {
+  if (!effect?.modifiers) return '';
+  const rules = effect.modifiers.find(m => m.kind === 'rules_text');
+  return rules?.value?.text || '';
+}
+
+function effectConditions(effect) {
+  if (!effect?.modifiers) return [];
+  return effect.modifiers
+    .filter(m => m.kind === 'apply_condition')
+    .map(m => m.value?.condition)
+    .filter(Boolean);
+}
+
+function effectDamageParts(effect, stats) {
+  if (!effect?.modifiers) return [];
+  const parts = [];
+  for (const mod of effect.modifiers) {
+    if (mod.kind === 'add_dice' && mod.target === 'damage') {
+      if (mod.value?.dice) parts.push(String(mod.value.dice));
+    }
+    if (mod.kind === 'add_ability_mod') {
+      const ability = mod.value?.ability;
+      if (!ability) continue;
+      let value = 0;
+      if (ability === 'spellcasting') {
+        value = stats.spellMod || 0;
+      } else if (char?.ability_scores?.[ability] !== undefined) {
+        value = abilityMod(char.ability_scores[ability]);
+      }
+      if (value) parts.push(modStr(value));
+    }
+    if (mod.kind === 'add_flat') {
+      const v = mod.value?.amount ?? mod.value;
+      if (typeof v === 'number' && v !== 0) parts.push(modStr(v));
+    }
+  }
+  return parts;
+}
+
+function effectHealingParts(effect, stats) {
+  if (!effect?.modifiers) return [];
+  const parts = [];
+  for (const mod of effect.modifiers) {
+    if (mod.kind === 'add_dice' && mod.target === 'healing') {
+      if (mod.value?.dice) parts.push(String(mod.value.dice));
+    }
+    if (mod.kind === 'add_ability_mod') {
+      const ability = mod.value?.ability;
+      if (!ability) continue;
+      let value = 0;
+      if (ability === 'spellcasting') {
+        value = stats.spellMod || 0;
+      } else if (char?.ability_scores?.[ability] !== undefined) {
+        value = abilityMod(char.ability_scores[ability]);
+      }
+      if (value) parts.push(modStr(value));
+    }
+    if (mod.kind === 'add_flat') {
+      const v = mod.value?.amount ?? mod.value;
+      if (typeof v === 'number' && v !== 0) parts.push(modStr(v));
+    }
+  }
+  return parts;
+}
+
+function buildDamageExpressionFromParts(parts) {
+  if (!parts.length) return '';
+  let expr = '';
+  parts.forEach(part => {
+    if (!part) return;
+    const p = String(part).trim();
+    if (!p) return;
+    if (!expr) {
+      expr = p;
+      return;
+    }
+    if (p.startsWith('+') || p.startsWith('-')) {
+      expr = `${expr} ${p}`;
+    } else {
+      expr = `${expr} + ${p}`;
+    }
+  });
+  return expr;
+}
+
+async function resolveActionDamage(actionName, actionTags = [], filter = null) {
+  if (!actionName) return null;
+  const context = {
+    action: { name: actionName, tags: actionTags },
+    roll: { type: 'damage' },
+  };
+  try {
+    const res = await API.post(`/characters/${charId}/effects/resolve`, {
+      context,
+      active_effects: state?.active_effects || [],
+      filter,
+    });
+    return res?.modifiers || [];
+  } catch (e) {
+    return null;
+  }
+}
+
+function buildDamageExpressionFromModifiers(modifiers, stats, opts = {}) {
+  if (!Array.isArray(modifiers)) return '';
+  const parts = [];
+  for (const mod of modifiers) {
+    if (mod.kind === 'add_dice' && mod.target === (opts.isHealing ? 'healing' : 'damage')) {
+      if (mod.value?.dice) parts.push(String(mod.value.dice));
+    }
+    if (mod.kind === 'add_ability_mod') {
+      const ability = mod.value?.ability;
+      if (!ability) continue;
+      let value = 0;
+      if (ability === 'spellcasting') value = stats.spellMod || 0;
+      else if (char?.ability_scores?.[ability] !== undefined) value = abilityMod(char.ability_scores[ability]);
+      if (value) parts.push(modStr(value));
+    }
+    if (mod.kind === 'add_flat') {
+      const v = mod.value?.amount ?? mod.value;
+      if (typeof v === 'number' && v !== 0) parts.push(modStr(v));
+    }
+  }
+  return buildDamageExpressionFromParts(parts);
+}
+
+async function resolveDamageForRows(rootEl, selector, tags = [], filter = null) {
+  if (!rootEl) return;
+  const rows = [...rootEl.querySelectorAll(selector)];
+  if (!rows.length) return;
+  const stats = getStats();
+  const jobs = rows.map(row => {
+    const actionName = row.getAttribute('data-action-name');
+    const btn = row.querySelector('.action-dmg-btn');
+    const isHealing = row.getAttribute('data-action-healing') === 'true';
+    if (!actionName || !btn) return null;
+    return { row, actionName, btn, isHealing };
+  }).filter(Boolean);
+
+  const resolved = await Promise.all(jobs.map(j => resolveActionDamage(j.actionName, tags, filter)));
+  resolved.forEach((mods, idx) => {
+    if (!mods) return;
+    const j = jobs[idx];
+    const modExpr = buildDamageExpressionFromModifiers(mods, stats, { isHealing: j.isHealing });
+    const baseExpr = j.row.getAttribute('data-action-base-damage') || '';
+    const expr = baseExpr && modExpr
+      ? buildDamageExpressionFromParts([baseExpr, modExpr])
+      : (baseExpr || modExpr);
+    if (!expr) return;
+    j.btn.textContent = buildDamageExpression(j.actionName, expr, { isHealing: j.isHealing });
+    j.btn.setAttribute('onclick', `rollDamage('${escapeAttr(j.actionName)}','${escapeAttr(expr)}',${JSON.stringify({ isHealing: j.isHealing, skipModifiers: true })})`);
+  });
+}
+
+function shorten(text, max = 160) {
+  const t = String(text || '').trim();
+  if (!t) return '';
+  if (t.length <= max) return t;
+  return `${t.slice(0, max - 1)}…`;
+}
+
+function buildNotesFromEffect(effect, extra = []) {
+  const notes = Array.isArray(extra) ? [...extra] : [];
+  const rules = effectRulesText(effect);
+  if (rules) notes.push(shorten(rules, 140));
+  const conds = effectConditions(effect);
+  if (conds.length) notes.push(`Applies: ${conds.map(c => String(c)).join(', ')}`);
+  return notes.filter(Boolean).join(' · ');
+}
+
+function clearTempHpSource(source) {
+  if (!source) return;
+  const res = state.class_resources || {};
+  if (source === 'agathys') {
+    setEffectActive('Armor of Agathys', false, '#50a0dc', 0);
+  }
+  if (source === 'form') {
+    res.form_active = false;
+    setEffectActive('Form of Dread', false, '#9860cc', 0);
+  }
+  state.class_resources = res;
+}
+
+function clearTempHp() {
+  const prevSource = state.hp_temp_source;
+  state.hp_temp = 0;
+  state.hp_temp_source = null;
+  if (prevSource) clearTempHpSource(prevSource);
+}
+
+function setTempHpSource(source, amount, effectName = null, color = '#6080cc') {
+  const prevSource = state.hp_temp_source;
+  if (prevSource && prevSource !== source && (state.hp_temp || 0) > 0) {
+    clearTempHpSource(prevSource);
+  }
+  state.hp_temp = amount;
+  state.hp_temp_source = source;
+  if (effectName) setEffectActive(effectName, amount > 0, color, 0);
 }
 
 function renderAbilityBoxes() {
@@ -2002,13 +2269,34 @@ function renderActions() {
   // ── Warlock ──────────────────────────────────────────────────
   if (cls === 'warlock') {
     // Eldritch Blast
-    const bm = char.level >= 17 ? 4 : char.level >= 11 ? 3 : char.level >= 5 ? 2 : 1;
-    const chaMod = abilityMod(char.ability_scores?.cha || 10);
-    buttons.push(spellBtn('⚡ Eldritch Blast', '#50a0dc', false, false, `useEB(${bm},${chaMod})`, getActionTooltip('eldritch_blast', 'Eldritch Blast'), 'attack', { range: '120 ft', hitdc: `+${stats.spellAtk}`, damage: '1d10', isSpell: true }));
+    const ebEffect = getEffectByName('Eldritch Blast') || getEffectForSpell(spellDetailsByName['eldritch blast']);
+    const ebBaseParts = effectDamageParts(ebEffect, stats);
+    const ebDamage = buildDamageExpressionFromParts(ebBaseParts.length ? ebBaseParts : ['1d10']);
+    const ebTooltip = effectRulesText(ebEffect) || getActionTooltip('eldritch_blast', 'Eldritch Blast');
+    const ebNotes = buildNotesFromEffect(ebEffect);
+    buttons.push(spellBtn('⚡ Eldritch Blast', '#50a0dc', false, false, "", ebTooltip, 'attack', {
+      range: '120 ft',
+      hitdc: `+${stats.spellAtk}`,
+      damage: ebDamage,
+      notes: ebNotes,
+      isSpell: true,
+      actionKind: 'spell',
+      actionName: 'Eldritch Blast',
+    }));
 
     // Vampiric Bite (Dhampir / Undead flavor)
     if (char.race_name?.toLowerCase().includes('dhampir') || char.subclass_name?.toLowerCase().includes('undead')) {
-      buttons.push(spellBtn('🦇 Vampiric Bite', '#cc4040', false, res.bite_used, 'useBite()', getActionTooltip('vampiric_bite', 'Vampiric Bite'), 'attack', { range: '5 ft', hitdc: `+${abilityMod(char.ability_scores?.con || 10)}`, damage: '1d4' }));
+      const biteEffect = getEffectByName('Vampiric Bite');
+      const biteTooltip = effectRulesText(biteEffect) || getActionTooltip('vampiric_bite', 'Vampiric Bite');
+      const biteNotes = buildNotesFromEffect(biteEffect);
+      buttons.push(spellBtn('🦇 Vampiric Bite', '#cc4040', false, res.bite_used, 'useBite()', biteTooltip, 'attack', {
+        range: '5 ft',
+        hitdc: `+${abilityMod(char.ability_scores?.con || 10)}`,
+        damage: buildDamageExpressionFromParts(effectDamageParts(biteEffect, stats)) || '1d4',
+        notes: biteNotes,
+        actionKind: 'feature',
+        actionName: 'Vampiric Bite',
+      }));
     }
 
     // Form of Dread (Undead patron)
@@ -2016,12 +2304,25 @@ function renderActions() {
       const fuMax = char.level >= 15 ? 4 : char.level >= 10 ? 3 : 2;
       const fuUsed = res.form_uses || 0;
       const formActive = !!res.form_active;
-      buttons.push(spellBtn(`💀 Form of Dread (${fuMax - fuUsed}/${fuMax})`, '#9860cc', formActive, !formActive && fuUsed >= fuMax, 'activateForm()', getActionTooltip('form_of_dread', 'Form of Dread'), 'action', { range: 'Self', useAction: true }));
+      const fodEffect = getEffectByName('Form of Dread');
+      const fodTooltip = effectRulesText(fodEffect) || getActionTooltip('form_of_dread', 'Form of Dread');
+      const fodNotes = buildNotesFromEffect(fodEffect);
+      buttons.push(spellBtn(`💀 Form of Dread (${fuMax - fuUsed}/${fuMax})`, '#9860cc', formActive, !formActive && fuUsed >= fuMax, 'activateForm()', fodTooltip, 'action', { range: 'Self', useAction: true, notes: fodNotes, actionKind: 'feature', actionName: 'Form of Dread' }));
     }
 
     if (hasSelectedFeatureName('Armor of Shadows')) {
       const mageArmorActive = !!res.mage_armor_active;
-      buttons.push(spellBtn('🛡 Mage Armor', '#50a0dc', mageArmorActive, false, 'toggleMageArmor()', getActionTooltip('mage_armor', 'Mage Armor'), 'action', { range: 'Self', isSpell: true }));
+      const maEffect = getEffectByName('Mage Armor');
+      const maTooltip = effectRulesText(maEffect) || getActionTooltip('mage_armor', 'Mage Armor');
+      const maNotes = buildNotesFromEffect(maEffect);
+      buttons.push(spellBtn('🛡 Mage Armor', '#50a0dc', mageArmorActive, false, 'toggleMageArmor()', maTooltip, 'action', {
+        range: 'Self',
+        isSpell: true,
+        actionKind: 'spell',
+        actionName: 'Mage Armor',
+        notes: maNotes,
+        useAction: true,
+      }));
     }
   }
 
@@ -2030,51 +2331,124 @@ function renderActions() {
     const rageMax = char.level >= 20 ? 999 : char.level >= 17 ? 6 : char.level >= 13 ? 5 : char.level >= 9 ? 4 : char.level >= 6 ? 3 : 2;
     const ragesUsed = res.rages_used || 0;
     const raging = !!res.raging;
-    buttons.push(spellBtn(`⚔ Rage (${rageMax - ragesUsed}/${rageMax})`, '#cc4040', raging, !raging && ragesUsed >= rageMax, 'toggleRage()', getActionTooltip('rage', 'Rage'), 'bonus', { range: 'Self' }));
-    if (char.level >= 2) buttons.push(spellBtn('🛡 Reckless Attack', '#cc6040', !!res.reckless, false, 'toggleReckless()', getActionTooltip('reckless_attack', 'Reckless Attack'), 'attack', { range: 'Self' }));
+    const rageEffect = getEffectByName('Rage');
+    const rageTooltip = effectRulesText(rageEffect) || getActionTooltip('rage', 'Rage');
+    const rageNotes = buildNotesFromEffect(rageEffect);
+    buttons.push(spellBtn(`⚔ Rage (${rageMax - ragesUsed}/${rageMax})`, '#cc4040', raging, !raging && ragesUsed >= rageMax, 'toggleRage()', rageTooltip, 'bonus', { range: 'Self', notes: rageNotes, actionKind: 'feature', actionName: 'Rage' }));
+    if (char.level >= 2) {
+      const recklessEffect = getEffectByName('Reckless Attack');
+      const recklessTooltip = effectRulesText(recklessEffect) || getActionTooltip('reckless_attack', 'Reckless Attack');
+      const recklessNotes = buildNotesFromEffect(recklessEffect);
+      buttons.push(spellBtn('🛡 Reckless Attack', '#cc6040', !!res.reckless, false, 'toggleReckless()', recklessTooltip, 'attack', { range: 'Self', notes: recklessNotes, actionKind: 'feature', actionName: 'Reckless Attack' }));
+    }
   }
 
   // ── Fighter ───────────────────────────────────────────────────
   if (cls === 'fighter') {
-    buttons.push(spellBtn('🔄 Second Wind', '#40cc80', false, !!res.second_wind_used, 'useSecondWind()', getActionTooltip('second_wind', 'Second Wind'), 'bonus', { range: 'Self' }));
+    const swEffect = getEffectByName('Second Wind');
+    const swTooltip = effectRulesText(swEffect) || getActionTooltip('second_wind', 'Second Wind');
+    const swNotes = buildNotesFromEffect(swEffect);
+    buttons.push(spellBtn('🔄 Second Wind', '#40cc80', false, !!res.second_wind_used, 'useSecondWind()', swTooltip, 'bonus', {
+      range: 'Self',
+      notes: swNotes,
+      actionKind: 'feature',
+      actionName: 'Second Wind',
+      damage: `1d10+${char.level}`,
+      isHealing: true,
+      forceOnclick: true,
+    }));
     if (char.level >= 2) {
       const asMax = char.level >= 17 ? 3 : char.level >= 2 ? 1 : 0;
       const asUsed = res.action_surge_used || 0;
-      buttons.push(spellBtn(`⚡ Action Surge (${asMax - asUsed}/${asMax})`, '#e8c170', false, asUsed >= asMax, 'useActionSurge()', getActionTooltip('action_surge', 'Action Surge'), 'action', { range: 'Self' }));
+      const asEffect = getEffectByName('Action Surge');
+      const asTooltip = effectRulesText(asEffect) || getActionTooltip('action_surge', 'Action Surge');
+      const asNotes = buildNotesFromEffect(asEffect);
+      buttons.push(spellBtn(`⚡ Action Surge (${asMax - asUsed}/${asMax})`, '#e8c170', false, asUsed >= asMax, 'useActionSurge()', asTooltip, 'action', { range: 'Self', notes: asNotes, actionKind: 'feature', actionName: 'Action Surge' }));
     }
-    if (char.level >= 9) buttons.push(spellBtn('🔁 Indomitable', '#6080cc', false, !!res.indomitable_used, 'useIndomitable()', getActionTooltip('indomitable', 'Indomitable'), 'other', { range: 'Self' }));
+    if (char.level >= 9) {
+      const indEffect = getEffectByName('Indomitable');
+      const indTooltip = effectRulesText(indEffect) || getActionTooltip('indomitable', 'Indomitable');
+      const indNotes = buildNotesFromEffect(indEffect);
+      buttons.push(spellBtn('🔁 Indomitable', '#6080cc', false, !!res.indomitable_used, 'useIndomitable()', indTooltip, 'other', { range: 'Self', notes: indNotes, actionKind: 'feature', actionName: 'Indomitable' }));
+    }
   }
 
   // ── Monk ──────────────────────────────────────────────────────
   if (cls === 'monk') {
     const kiMax = char.level;
     const kiUsed = res.ki_used || 0;
-    buttons.push(spellBtn(`✨ Ki (${kiMax - kiUsed}/${kiMax})`, '#e8c170', false, kiUsed >= kiMax, 'useKi(1)', getActionTooltip('ki', 'Ki'), 'bonus', { range: 'Self' }));
-    buttons.push(spellBtn('👊 Flurry of Blows', '#cc6040', false, (res.ki_used||0)+2 > kiMax, 'useKi(2)', getActionTooltip('flurry_of_blows', 'Flurry of Blows'), 'bonus', { range: 'Melee' }));
-    if (char.level >= 2) buttons.push(spellBtn('🏃 Step of Wind', '#50a0dc', false, (res.ki_used||0)+1 > kiMax, 'useKi(1)', getActionTooltip('step_of_wind', 'Step of the Wind'), 'bonus', { range: 'Self' }));
-    if (char.level >= 2) buttons.push(spellBtn('🛡 Patient Defense', '#9860cc', false, (res.ki_used||0)+1 > kiMax, 'useKi(1)', getActionTooltip('patient_defense', 'Patient Defense'), 'bonus', { range: 'Self' }));
+    const kiEffect = getEffectByName('Ki');
+    const kiTooltip = effectRulesText(kiEffect) || getActionTooltip('ki', 'Ki');
+    const kiNotes = buildNotesFromEffect(kiEffect);
+    buttons.push(spellBtn(`✨ Ki (${kiMax - kiUsed}/${kiMax})`, '#e8c170', false, kiUsed >= kiMax, 'useKi(1)', kiTooltip, 'bonus', { range: 'Self', notes: kiNotes, actionKind: 'feature', actionName: 'Ki' }));
+    const fobEffect = getEffectByName('Flurry of Blows');
+    const fobTooltip = effectRulesText(fobEffect) || getActionTooltip('flurry_of_blows', 'Flurry of Blows');
+    const fobNotes = buildNotesFromEffect(fobEffect, kiNotes ? [kiNotes] : []);
+    buttons.push(spellBtn('👊 Flurry of Blows', '#cc6040', false, (res.ki_used||0)+2 > kiMax, 'useKi(2)', fobTooltip, 'bonus', { range: 'Melee', notes: fobNotes, actionKind: 'feature', actionName: 'Flurry of Blows' }));
+    if (char.level >= 2) {
+      const sowEffect = getEffectByName('Step of the Wind');
+      const sowTooltip = effectRulesText(sowEffect) || getActionTooltip('step_of_wind', 'Step of the Wind');
+      const sowNotes = buildNotesFromEffect(sowEffect, kiNotes ? [kiNotes] : []);
+      buttons.push(spellBtn('🏃 Step of Wind', '#50a0dc', false, (res.ki_used||0)+1 > kiMax, 'useKi(1)', sowTooltip, 'bonus', { range: 'Self', notes: sowNotes, actionKind: 'feature', actionName: 'Step of the Wind' }));
+    }
+    if (char.level >= 2) {
+      const pdEffect = getEffectByName('Patient Defense');
+      const pdTooltip = effectRulesText(pdEffect) || getActionTooltip('patient_defense', 'Patient Defense');
+      const pdNotes = buildNotesFromEffect(pdEffect, kiNotes ? [kiNotes] : []);
+      buttons.push(spellBtn('🛡 Patient Defense', '#9860cc', false, (res.ki_used||0)+1 > kiMax, 'useKi(1)', pdTooltip, 'bonus', { range: 'Self', notes: pdNotes, actionKind: 'feature', actionName: 'Patient Defense' }));
+    }
   }
 
   // ── Rogue ─────────────────────────────────────────────────────
   if (cls === 'rogue') {
     const sneak = Math.ceil(char.level / 2);
-    buttons.push(spellBtn(`🗡 Sneak Attack (${sneak}d6)`, '#cc9040', false, false, `addLog('Sneak Attack: ${sneak}d6 extra damage')`, getActionTooltip('sneak_attack', 'Sneak Attack'), 'attack', { range: 'Melee/Ranged', damage: `${sneak}d6` }));
-    if (char.level >= 2) buttons.push(spellBtn('🌪 Cunning Action', '#50a0dc', false, false, `addLog('Cunning Action: Dash, Disengage, or Hide as bonus action')`, getActionTooltip('cunning_action', 'Cunning Action'), 'bonus', { range: 'Self' }));
+    const saEffect = getEffectByName('Sneak Attack');
+    const saTooltip = effectRulesText(saEffect) || getActionTooltip('sneak_attack', 'Sneak Attack');
+    const saNotes = buildNotesFromEffect(saEffect);
+    const saActive = isEffectActive('Sneak Attack');
+    buttons.push(spellBtn(`🗡 Sneak Attack (${sneak}d6)`, '#cc9040', saActive, false, 'toggleSneakAttack()', saTooltip, 'attack', {
+      range: 'Melee/Ranged',
+      damage: `${sneak}d6`,
+      notes: saNotes,
+      actionKind: 'feature',
+      actionName: 'Sneak Attack',
+      forceOnclick: true,
+    }));
+    if (char.level >= 2) {
+      const caEffect = getEffectByName('Cunning Action');
+      const caTooltip = effectRulesText(caEffect) || getActionTooltip('cunning_action', 'Cunning Action');
+      const caNotes = buildNotesFromEffect(caEffect);
+      buttons.push(spellBtn('🌪 Cunning Action', '#50a0dc', false, false, `addLog('Cunning Action: Dash, Disengage, or Hide as bonus action')`, caTooltip, 'bonus', { range: 'Self', notes: caNotes, actionKind: 'feature', actionName: 'Cunning Action' }));
+    }
   }
 
   // ── Sorcerer ──────────────────────────────────────────────────
   if (cls === 'sorcerer') {
     const spMax = char.level;
     const spUsed = res.sorcery_points_used || 0;
-    buttons.push(spellBtn(`✨ Sorcery Points (${spMax - spUsed}/${spMax})`, '#cc60cc', false, spUsed >= spMax, 'useSorceryPoint(1)', getActionTooltip('sorcery_points', 'Sorcery Points'), 'other', { range: 'Self' }));
-    buttons.push(spellBtn('🔄 Metamagic', '#cc60cc', false, false, `addLog('Metamagic applied')`, getActionTooltip('metamagic', 'Metamagic'), 'other', { range: 'Self' }));
+    const spEffect = getEffectByName('Font of Magic');
+    const spTooltip = effectRulesText(spEffect) || getActionTooltip('sorcery_points', 'Sorcery Points');
+    const spNotes = buildNotesFromEffect(spEffect);
+    buttons.push(spellBtn(`✨ Sorcery Points (${spMax - spUsed}/${spMax})`, '#cc60cc', false, spUsed >= spMax, 'useSorceryPoint(1)', spTooltip, 'other', { range: 'Self', notes: spNotes, actionKind: 'feature', actionName: 'Font of Magic' }));
+    const mmEffect = getEffectByName('Metamagic');
+    const mmTooltip = effectRulesText(mmEffect) || getActionTooltip('metamagic', 'Metamagic');
+    const mmNotes = buildNotesFromEffect(mmEffect);
+    buttons.push(spellBtn('🔄 Metamagic', '#cc60cc', false, false, `addLog('Metamagic applied')`, mmTooltip, 'other', { range: 'Self', notes: mmNotes, actionKind: 'feature', actionName: 'Metamagic' }));
   }
 
   // ── Paladin ───────────────────────────────────────────────────
   if (cls === 'paladin') {
     const lohPool = res.lay_on_hands_pool ?? char.level * 5;
-    buttons.push(spellBtn(`🙏 Lay on Hands (${lohPool} HP)`, '#40cc80', false, lohPool <= 0, 'useLayOnHands()', getActionTooltip('lay_on_hands', 'Lay on Hands'), 'action', { range: 'Touch' }));
-    if (char.level >= 2) buttons.push(spellBtn('⚔ Divine Smite', '#e8c170', false, false, `addLog('Divine Smite: expend a spell slot for 2d8 radiant + 1d8 per slot level above 1st')`, getActionTooltip('divine_smite', 'Divine Smite'), 'attack', { range: 'Melee', damage: '2d8' }));
+    const lohEffect = getEffectByName('Lay on Hands');
+    const lohTooltip = effectRulesText(lohEffect) || getActionTooltip('lay_on_hands', 'Lay on Hands');
+    const lohNotes = buildNotesFromEffect(lohEffect);
+    buttons.push(spellBtn(`🙏 Lay on Hands (${lohPool} HP)`, '#40cc80', false, lohPool <= 0, 'useLayOnHands()', lohTooltip, 'action', { range: 'Touch', notes: lohNotes, actionKind: 'feature', actionName: 'Lay on Hands' }));
+    if (char.level >= 2) {
+      const smiteEffect = getEffectByName('Divine Smite');
+      const smiteTooltip = effectRulesText(smiteEffect) || getActionTooltip('divine_smite', 'Divine Smite');
+      const smiteNotes = buildNotesFromEffect(smiteEffect);
+      buttons.push(spellBtn('⚔ Divine Smite', '#e8c170', false, false, `addLog('Divine Smite: expend a spell slot for 2d8 radiant + 1d8 per slot level above 1st')`, smiteTooltip, 'attack', { range: 'Melee', damage: '2d8', notes: smiteNotes, actionKind: 'feature', actionName: 'Divine Smite' }));
+    }
   }
 
   // ── Bard ──────────────────────────────────────────────────────
@@ -2083,14 +2457,22 @@ function renderActions() {
     const biMax = char.spellcasting_ability ? abilityMod(char.ability_scores?.cha || 10) : 1;
     const biUsed = res.bardic_inspiration_used || 0;
     const biRemain = Math.max(0, biMax - biUsed);
-    buttons.push(spellBtn(`🎵 Bardic Inspiration (${biRemain}/${biMax} ${biDie})`, '#cc9040', false, biRemain <= 0, 'useBardicInspiration()', getActionTooltip('bardic_inspiration', 'Bardic Inspiration'), 'bonus', { range: '60 ft' }));
+    const biEffect = getEffectByName('Bardic Inspiration');
+    const biTooltip = effectRulesText(biEffect) || getActionTooltip('bardic_inspiration', 'Bardic Inspiration');
+    const biNotes = buildNotesFromEffect(biEffect);
+    buttons.push(spellBtn(`🎵 Bardic Inspiration (${biRemain}/${biMax} ${biDie})`, '#cc9040', false, biRemain <= 0, 'useBardicInspiration()', biTooltip, 'bonus', { range: '60 ft', notes: biNotes, actionKind: 'feature', actionName: 'Bardic Inspiration' }));
   }
 
   // ── Druid ─────────────────────────────────────────────────────
   if (cls === 'druid') {
     const wcMax = char.level >= 18 ? 999 : char.level >= 6 ? 2 : char.level >= 2 ? 1 : 0;
     const wcUsed = res.wild_shape_used || 0;
-    if (wcMax > 0) buttons.push(spellBtn(`🐺 Wild Shape (${wcMax - wcUsed}/${wcMax})`, '#40cc80', !!res.wild_shaped, wcUsed >= wcMax, 'toggleWildShape()', getActionTooltip('wild_shape', 'Wild Shape'), 'action', { range: 'Self' }));
+    if (wcMax > 0) {
+      const wsEffect = getEffectByName('Wild Shape');
+      const wsTooltip = effectRulesText(wsEffect) || getActionTooltip('wild_shape', 'Wild Shape');
+      const wsNotes = buildNotesFromEffect(wsEffect);
+      buttons.push(spellBtn(`🐺 Wild Shape (${wcMax - wcUsed}/${wcMax})`, '#40cc80', !!res.wild_shaped, wcUsed >= wcMax, 'toggleWildShape()', wsTooltip, 'action', { range: 'Self', notes: wsNotes, actionKind: 'feature', actionName: 'Wild Shape' }));
+    }
   }
 
   // ── Cleric ────────────────────────────────────────────────────
@@ -2098,16 +2480,47 @@ function renderActions() {
     if (char.level >= 2) {
       const cdUsed = res.channel_divinity_used || 0;
       const cdMax = char.level >= 18 ? 3 : char.level >= 6 ? 2 : 1;
-      buttons.push(spellBtn(`✝ Channel Divinity (${cdMax - cdUsed}/${cdMax})`, '#e8c170', false, cdUsed >= cdMax, 'useChannelDivinity()', getActionTooltip('channel_divinity', 'Channel Divinity'), 'action', { range: 'Self' }));
+      const cdEffect = getEffectByName('Channel Divinity');
+      const cdTooltip = effectRulesText(cdEffect) || getActionTooltip('channel_divinity', 'Channel Divinity');
+      const cdNotes = buildNotesFromEffect(cdEffect);
+      buttons.push(spellBtn(`✝ Channel Divinity (${cdMax - cdUsed}/${cdMax})`, '#e8c170', false, cdUsed >= cdMax, 'useChannelDivinity()', cdTooltip, 'action', { range: 'Self', notes: cdNotes, actionKind: 'feature', actionName: 'Channel Divinity' }));
+    }
+  }
+
+  // ── Weapons (equipped) ─────────────────────────────────────────
+  const weaponItems = (inventory || []).filter(i => i.item_type === 'weapon' && i.equipped);
+  if (weaponItems.length) {
+    for (const item of weaponItems) {
+      const atkBonus = item.weapon_atk_bonus == null
+        ? (stats.pb + (stats.mods?.str || 0))
+        : parseInt(item.weapon_atk_bonus, 10);
+      const hitdc = Number.isFinite(atkBonus) ? modStr(atkBonus) : '—';
+      const dmg = item.weapon_damage || '';
+      const notes = item.notes || '';
+      buttons.push(spellBtn(`⚔ ${item.name}`, '#cc6040', false, false, `addLog('Attack: ${escapeAttr(item.name)}')`, item.name, 'attack', {
+        range: '—',
+        hitdc,
+        damage: dmg,
+        baseDamage: dmg,
+        notes,
+        actionKind: 'weapon',
+        actionName: item.name,
+      }));
     }
   }
 
   // ── Generic spellcaster quick-actions ────────────────────────
   if (hasSelectedFeatureName('Protection')) {
-    buttons.push(spellBtn('🛡 Protection (Reaction)', '#6080cc', false, false, `addLog('Protection: impose disadvantage on attack vs ally within 5 ft')`, getActionTooltip('protection', 'Protection'), 'reaction', { range: '5 ft' }));
+    const protEffect = getEffectByName('Protection');
+    const protTooltip = effectRulesText(protEffect) || getActionTooltip('protection', 'Protection');
+    const protNotes = buildNotesFromEffect(protEffect);
+    buttons.push(spellBtn('🛡 Protection (Reaction)', '#6080cc', false, false, `addLog('Protection: impose disadvantage on attack vs ally within 5 ft')`, protTooltip, 'reaction', { range: '5 ft', notes: protNotes, actionKind: 'feature', actionName: 'Protection' }));
   }
   if (hasSelectedFeatureName('Interception')) {
-    buttons.push(spellBtn('🛡 Interception (Reaction)', '#6080cc', false, false, `addLog('Interception: reduce damage by 1d10 + PB')`, getActionTooltip('interception', 'Interception'), 'reaction', { range: '5 ft' }));
+    const intEffect = getEffectByName('Interception');
+    const intTooltip = effectRulesText(intEffect) || getActionTooltip('interception', 'Interception');
+    const intNotes = buildNotesFromEffect(intEffect);
+    buttons.push(spellBtn('🛡 Interception (Reaction)', '#6080cc', false, false, `addLog('Interception: reduce damage by 1d10 + PB')`, intTooltip, 'reaction', { range: '5 ft', notes: intNotes, actionKind: 'feature', actionName: 'Interception' }));
   }
 
   // ── Generic spellcaster quick-actions ────────────────────────
@@ -2117,14 +2530,19 @@ function renderActions() {
       .filter(s => knownSpells.includes(s.id) && s.level > 0)
       .sort((a, b) => (a.level - b.level) || a.name.localeCompare(b.name));
     for (const sp of quickSpells) {
-      const noSlots = checkNoSlots(sp.level);
+      const noSlots = isSpellNoSlot(sp.name) ? false : checkNoSlots(sp.level);
       const isConc = sp.concentration;
       const isAgathys = (sp.name || '').toLowerCase() === 'armor of agathys';
       const isActive = state.concentration === sp.name || (isAgathys && state.hp_temp_source === 'agathys' && (state.hp_temp || 0) > 0);
-      const spellMod = modStr(stats.mods[char.spellcasting_ability] || 0);
-      const hitdc = sp.saving_throw || sp.save || sp.saving_throw_ability
+      const spellEffect = getEffectForSpell(spellDetailsById[sp.id] || sp);
+      const effectMeta = spellEffect?.meta || {};
+      const hitdc = (effectMeta.saving_throw && effectMeta.saving_throw.length)
         ? `DC ${stats.spellDC}`
-        : (sp.attack_type || sp.attack_roll ? `+${stats.spellAtk}` : '—');
+        : (effectMeta.spell_attack && effectMeta.spell_attack.length)
+          ? `+${stats.spellAtk}`
+          : (sp.saving_throw || sp.save || sp.saving_throw_ability)
+            ? `DC ${stats.spellDC}`
+            : (sp.attack_type || sp.attack_roll ? `+${stats.spellAtk}` : '—');
       const noteParts = [];
       const comps = formatComponents(sp.components);
       if (comps && comps !== '—') noteParts.push(comps);
@@ -2134,10 +2552,20 @@ function renderActions() {
       const isHex = String(sp.name || '').toLowerCase() === 'hex';
       const isHeal = isHealingSpell(sp.name);
       const detail = spellDetailsById[sp.id] || sp;
-      const baseText = toPlainEntryText(detail?.data?.entries || detail?.entries || '');
-      const dmgExprRaw = isHeal ? extractDamageDice(baseText) : extractDamageExpression(baseText);
-      const dmgExpr = isHex ? '' : dmgExprRaw;
-      buttons.push(spellBtn(`${isConc ? '👁 ' : ''}${sp.name}`, isConc ? '#b48c3c' : '#6080cc', isActive, noSlots && !isActive, `quickCast(${sp.id})`, getSpellTooltip(sp), inferSpellActionType(sp), { range: sp.range_text || '—', hitdc, notes: noteParts.join(' · '), damage: dmgExpr, useAction: isHex, isSpell: true, isHealing: isHeal }));
+      const dmgExpr = isHex ? '' : buildDamageExpressionFromParts(isHeal ? effectHealingParts(spellEffect, stats) : effectDamageParts(spellEffect, stats));
+      const tooltip = effectRulesText(spellEffect) || getSpellTooltip(sp);
+      const notes = buildNotesFromEffect(spellEffect, noteParts);
+      buttons.push(spellBtn(`${isConc ? '👁 ' : ''}${sp.name}`, isConc ? '#b48c3c' : '#6080cc', isActive, noSlots && !isActive, `quickCast(${sp.id})`, tooltip, inferSpellActionType(sp), {
+        range: sp.range_text || '—',
+        hitdc,
+        notes,
+        damage: dmgExpr,
+        useAction: isHex,
+        isSpell: true,
+        isHealing: isHeal,
+        actionKind: 'spell',
+        actionName: sp.name,
+      }));
     }
   }
 
@@ -2148,6 +2576,7 @@ function renderActions() {
   grid.innerHTML = buttons.join('');
   updateActionFilterUI();
   applyActionFilter(actionFilter);
+  resolveActionDamageForRenderedActions();
 
   // Damage reference for Warlock
   if (cls === 'warlock' && dmgCard) {
@@ -2160,7 +2589,21 @@ function renderActions() {
   }
 }
 
+async function resolveActionDamageForRenderedActions() {
+  const grid = document.getElementById('actionsGrid');
+  if (!grid) return;
+  await resolveDamageForRows(grid, '.action-row[data-action-kind="spell"]', ['spell'], { action_type: 'spell' });
+  await resolveDamageForRows(grid, '.action-row[data-action-kind="weapon"]', ['weapon'], { action_type: 'weapon' });
+}
+
+function refreshSpellDamageResolution() {
+  const spellGrid = document.getElementById('spellGrid');
+  if (!spellGrid) return;
+  resolveDamageForRows(spellGrid, '.action-row[data-action-kind="spell"]', ['spell'], { action_type: 'spell' });
+}
+
 function spellBtn(label, color, active, dim, onclick, tooltip = '', type = 'other', meta = {}) {
+  const actionName = meta.actionName || label;
   const tip = escapeAttr(tooltip || label);
   const name = escapeHtml(label);
   const range = escapeHtml(meta.range || '—');
@@ -2168,7 +2611,11 @@ function spellBtn(label, color, active, dim, onclick, tooltip = '', type = 'othe
   const noteText = meta.notes || '';
   const notes = escapeHtml(noteText || '');
   const dmgFromMeta = meta.damage || '';
-  const dmgFromTip = meta.useAction ? '' : (extractDamageExpression(tooltip) || extractDamageExpression(label));
+  const dmgFromTip = meta.useAction
+    ? ''
+    : (meta.isHealing
+      ? (extractDamageDice(tooltip) || extractDamageDice(label))
+      : (extractDamageExpression(tooltip) || extractDamageExpression(label)));
   const rollExpr = dmgFromMeta || dmgFromTip;
   const displayExpr = rollExpr ? buildDamageExpression(label, rollExpr, { isHealing: meta.isHealing }) : '';
   const fallbackLabel = meta.useAction ? 'Use' : (meta.isSpell ? 'Cast' : 'Use');
@@ -2176,9 +2623,12 @@ function spellBtn(label, color, active, dim, onclick, tooltip = '', type = 'othe
   const useDisabled = dim ? 'disabled' : '';
   const rowStyle = dim ? 'opacity:0.55;' : '';
   const btnClass = 'action-dmg-btn';
-  const btnAction = rollExpr ? `rollDamage('${escapeAttr(label)}','${escapeAttr(rollExpr)}',${meta.isHealing ? 'true' : 'false'})` : onclick;
+  const useRollAction = rollExpr && !meta.forceOnclick;
+  const btnAction = useRollAction
+    ? `rollDamage('${escapeAttr(label)}','${escapeAttr(rollExpr)}',${meta.isHealing ? 'true' : 'false'})`
+    : onclick;
   return `
-    <div class="action-row" data-action-type="${type}" style="border-color:${active ? color : 'var(--border)'};${rowStyle}">
+    <div class="action-row" data-action-type="${type}" data-action-name="${escapeAttr(actionName)}" data-action-kind="${escapeAttr(meta.actionKind || '')}" data-action-healing="${meta.isHealing ? 'true' : 'false'}" data-action-base-damage="${escapeAttr(meta.baseDamage || '')}" style="border-color:${active ? color : 'var(--border)'};${rowStyle}">
       <div class="action-name" data-tip="${tip}" style="color:${active ? color : 'var(--text)'}">${name}</div>
       <div class="action-range">${range}</div>
       <div class="action-hit">${hitdc}</div>
@@ -2233,10 +2683,7 @@ function applyDmg(amt) {
     }
     state.hp_temp -= tL;
     if (state.hp_temp === 0) {
-      if (state.hp_temp_source === 'agathys') {
-        setEffectActive('Armor of Agathys', false, '#50a0dc', 0);
-      }
-      state.hp_temp_source = null;
+      clearTempHp();
     }
   }
   if (rem > 0) { hL = rem; state.hp_current = Math.max(0, state.hp_current - rem); }
@@ -2379,6 +2826,7 @@ function dropConc() {
   renderConcBanner();
   renderExtras();
   renderActions();
+  refreshSpellDamageResolution();
 }
 
 function renderConcBanner() {
@@ -2417,6 +2865,7 @@ function dismissEffect(idx) {
   renderHpPanel();
   renderExtras();
   renderActions();
+  refreshSpellDamageResolution();
   renderActionEffects();
 }
 
@@ -2443,6 +2892,7 @@ function setEffectActive(name, active, color = '#9860cc', durationRounds = 0, lo
     state.active_effects = state.active_effects.filter(e => !sameName(e));
   }
   renderActionEffects();
+  refreshSpellDamageResolution();
 }
 
 function syncResourceEffects() {
@@ -2593,6 +3043,10 @@ function nextRound() {
   if ((char.class_name||'').toLowerCase() === 'warlock') {
     res.bite_used = false;
   }
+  if (isEffectActive('Sneak Attack')) {
+    setEffectActive('Sneak Attack', false, '#cc9040', 0, false, 'sneak_attack');
+    addLog('Sneak Attack toggled off (new round).');
+  }
   state.class_resources = res;
   addLog(`── Round ${state.combat_round} ──`);
   renderCombatSection();
@@ -2702,6 +3156,7 @@ function activateForm() {
   if (res.form_active) {
     res.form_active = false;
     state.class_resources = res;
+    if (state.hp_temp_source === 'form') clearTempHp();
     setEffectActive('Form of Dread', false);
     addLog('Form of Dread ended.');
     debouncedSaveState();
@@ -2716,8 +3171,7 @@ function activateForm() {
     toast('Failed to roll Form of Dread temp HP.', 'error');
     return;
   }
-  state.hp_temp = rolled.total;
-  state.hp_temp_source = 'form';
+  setTempHpSource('form', rolled.total, 'Form of Dread', '#9860cc');
   res.form_active = true;
   res.form_uses = (res.form_uses || 0) + 1;
   state.class_resources = res;
@@ -2760,15 +3214,15 @@ function toggleReckless() {
 function useSecondWind() {
   const res = state.class_resources || {};
   if (res.second_wind_used) { addLog('Second Wind already used (recovers on short rest)!'); return; }
-  const con = abilityMod(char.ability_scores?.con || 10);
-  const roll = Math.floor(Math.random() * char.hit_die || 10) + 1 + char.level;
+  const rollExpr = `1d10+${char.level}`;
   res.second_wind_used = true;
   state.class_resources = res;
-  state.hp_current = Math.min((char.stat_overrides?.hp_max || state.hp_current), state.hp_current + roll);
-  addLog(`Second Wind! Regained ${roll} HP.`);
+  const rolled = rollDamage('Second Wind', rollExpr, { isHealing: true, skipModifiers: true, applyHealing: true });
+  if (!rolled) return;
   debouncedSaveState();
   renderHpPanel();
   renderExtras();
+  renderActions();
 }
 
 function useActionSurge() {
@@ -2788,6 +3242,14 @@ function useIndomitable() {
   res.indomitable_used = true;
   state.class_resources = res;
   addLog('Indomitable: reroll a saving throw.');
+  debouncedSaveState();
+  renderActions();
+}
+
+function toggleSneakAttack() {
+  const active = isEffectActive('Sneak Attack');
+  setEffectActive('Sneak Attack', !active, '#cc9040', 0, false, 'sneak_attack');
+  addLog(active ? 'Sneak Attack toggled off.' : 'Sneak Attack toggled on.');
   debouncedSaveState();
   renderActions();
 }
@@ -2872,10 +3334,10 @@ function useChannelDivinity() {
 function quickCast(spellId) {
   const spell = spellsById[spellId];
   if (!spell) return;
+  const noSlot = isSpellNoSlot(spell.name);
   const isAgathys = (spell.name || '').toLowerCase() === 'armor of agathys';
   if (isAgathys && state.hp_temp_source === 'agathys' && (state.hp_temp || 0) > 0) {
-    state.hp_temp = 0;
-    state.hp_temp_source = null;
+    clearTempHp();
     setEffectActive('Armor of Agathys', false, '#50a0dc', 0);
     addLog('Armor of Agathys ended.');
     debouncedSaveState();
@@ -2885,34 +3347,38 @@ function quickCast(spellId) {
     renderSpells();
     return;
   }
-  // Find slot to spend
-  const prog = progression?.find(r => r.level === char.level);
-  if (!prog) return;
-  const slots = prog.spell_slots || [];
-  const used = state.spell_slots_used || {};
   let slotSpent = false;
   let slotLevelUsed = spell.level;
 
-  if (char.caster_progression === 'pact') {
-    const pactIdx = slots.findIndex(n => n > 0);
-    if (pactIdx >= 0 && (used[pactIdx]||0) < slots[pactIdx]) {
-      used[pactIdx] = (used[pactIdx]||0) + 1;
-      slotSpent = true;
-      slotLevelUsed = pactIdx + 1;
-    }
-  } else {
-    for (let l = Math.max(0, spell.level - 1); l < 9; l++) {
-      if ((slots[l]||0) > (used[l]||0)) {
-        used[l] = (used[l]||0) + 1;
+  if (!noSlot && spell.level > 0) {
+    const prog = progression?.find(r => r.level === char.level);
+    if (!prog) return;
+    const slots = prog.spell_slots || [];
+    const used = state.spell_slots_used || {};
+
+    if (char.caster_progression === 'pact') {
+      const pactIdx = slots.findIndex(n => n > 0);
+      if (pactIdx >= 0 && (used[pactIdx]||0) < slots[pactIdx]) {
+        used[pactIdx] = (used[pactIdx]||0) + 1;
         slotSpent = true;
-        slotLevelUsed = l + 1;
-        break;
+        slotLevelUsed = pactIdx + 1;
+      }
+    } else {
+      for (let l = Math.max(0, spell.level - 1); l < 9; l++) {
+        if ((slots[l]||0) > (used[l]||0)) {
+          used[l] = (used[l]||0) + 1;
+          slotSpent = true;
+          slotLevelUsed = l + 1;
+          break;
+        }
       }
     }
-  }
 
-  if (!slotSpent) { addLog('No spell slots available!'); return; }
-  state.spell_slots_used = used;
+    if (!slotSpent) { addLog('No spell slots available!'); return; }
+    state.spell_slots_used = used;
+  } else if (noSlot) {
+    slotSpent = true;
+  }
 
   if (spell.concentration) {
     if (state.concentration) {
@@ -2926,8 +3392,7 @@ function quickCast(spellId) {
 
   if (isAgathys) {
     const temp = 5 * Math.max(1, slotLevelUsed || spell.level || 1);
-    state.hp_temp = temp;
-    state.hp_temp_source = 'agathys';
+    setTempHpSource('agathys', temp, 'Armor of Agathys', '#50a0dc');
     setEffectActive('Armor of Agathys', true, '#50a0dc', 0);
     addLog(`Armor of Agathys: gained ${temp} temp HP (retaliates while temp HP remains).`);
   }
@@ -3023,15 +3488,21 @@ function renderSpells() {
     for (const sp of levelSpells.sort((a,b) => a.name.localeCompare(b.name))) {
       if (query && !String(sp.name || '').toLowerCase().includes(query)) continue;
       const detail = spellDetailsById[sp.id] || sp;
-      const tooltip = getSpellTooltip(detail);
-      const spellMod = modStr(stats.mods[char.spellcasting_ability] || 0);
-      const hitdc = sp.saving_throw || sp.save || sp.saving_throw_ability
+      const isHeal = isHealingSpell(sp.name);
+      const spellEffect = getEffectForSpell(detail);
+      const effectMeta = spellEffect?.meta || {};
+      const tooltip = effectRulesText(spellEffect) || getSpellTooltip(detail);
+      const hitdc = (effectMeta.saving_throw && effectMeta.saving_throw.length)
         ? `DC ${stats.spellDC}`
-        : (sp.attack_type || sp.attack_roll ? `+${stats.spellAtk}` : '—');
+        : (effectMeta.spell_attack && effectMeta.spell_attack.length)
+          ? `+${stats.spellAtk}`
+          : (sp.saving_throw || sp.save || sp.saving_throw_ability)
+            ? `DC ${stats.spellDC}`
+            : (sp.attack_type || sp.attack_roll ? `+${stats.spellAtk}` : '—');
+      const dmgFromEffect = buildDamageExpressionFromParts(isHeal ? effectHealingParts(spellEffect, stats) : effectDamageParts(spellEffect, stats));
       const baseText = toPlainEntryText(detail?.data?.entries || detail?.entries || '');
       const dmgRaw = isHeal ? (extractDamageDice(baseText) || '') : (extractDamageExpression(baseText) || '');
-      const dmg = String(sp.name || '').toLowerCase() === 'hex' ? '' : dmgRaw;
-      const isHeal = isHealingSpell(sp.name);
+      const dmg = String(sp.name || '').toLowerCase() === 'hex' ? '' : (dmgFromEffect || dmgRaw);
       const displayExpr = dmg ? buildDamageExpression(sp.name, dmg, { isHealing: isHeal }) : '';
       const noteParts = [];
       const comps = formatComponents(sp.components);
@@ -3039,15 +3510,16 @@ function renderSpells() {
       if (sp.duration_text) noteParts.push(shortDuration(sp.duration_text));
       if (sp.concentration) noteParts.push('Concentration');
       if (sp.ritual) noteParts.push('Ritual');
+      const notes = buildNotesFromEffect(spellEffect, noteParts);
       rows += `
-        <div class="action-row">
+        <div class="action-row" data-action-name="${escapeAttr(sp.name)}" data-action-kind="spell" data-action-healing="${isHeal ? 'true' : 'false'}">
           <div class="action-name" data-tip="${escapeAttr(tooltip)}">${escapeHtml(sp.name)}</div>
           <div class="action-range">${escapeHtml(sp.range_text || '—')}</div>
           <div class="action-hit">${escapeHtml(hitdc)}</div>
           <div class="action-damage">
             <button class="action-dmg-btn" onclick="${dmg ? `rollDamage('${escapeAttr(sp.name)}','${escapeAttr(dmg)}',${isHeal ? 'true' : 'false'})` : `quickCast(${sp.id})`}">${escapeHtml(displayExpr || 'Cast')}</button>
           </div>
-          <div class="action-notes">${escapeHtml(noteParts.join(' · '))}</div>
+          <div class="action-notes">${escapeHtml(notes || noteParts.join(' · '))}</div>
         </div>
       `;
     }
@@ -3073,9 +3545,11 @@ function renderSpells() {
         <div>Damage</div>
         <div>Notes</div>
       </div>
-      ${rows}
+      <div id="spellGrid">${rows}</div>
     </div>
   `;
+  const spellGrid = document.getElementById('spellGrid');
+  if (spellGrid) resolveDamageForRows(spellGrid, '.action-row[data-action-kind="spell"]', ['spell'], { action_type: 'spell' });
 }
 
 function renderSpellCard(sp, noSlot, showPrepared, isPreparedNow) {
@@ -3558,6 +4032,7 @@ function renderInventory() {
                 <td>
                   <div class="inv-name">${item.name}</div>
                   <span class="inv-type" style="background:${typeColors[item.item_type]||'#5a5040'}18;color:${typeColors[item.item_type]||'#5a5040'};border:1px solid ${typeColors[item.item_type]||'#5a5040'}33">${item.item_type}</span>
+                  ${item.item_type === 'weapon' ? `<div style="font-size:10px;color:var(--dim);margin-top:2px">Atk ${item.weapon_atk_bonus != null ? modStr(parseInt(item.weapon_atk_bonus, 10) || 0) : '—'} · Dmg ${item.weapon_damage || '—'}</div>` : ''}
                   ${item.notes ? `<div style="font-size:10px;color:var(--dim);margin-top:2px">${item.notes}</div>` : ''}
                 </td>
                 <td style="text-align:center"><input type="number" min="1" value="${item.quantity}" style="width:44px;background:var(--paper);border:1px solid var(--border);border-radius:3px;color:var(--text);padding:2px 4px;font-size:12px;font-family:inherit;outline:none;text-align:center" oninput="updateItem(${item.id},'quantity',this.value)"></td>
@@ -3619,6 +4094,9 @@ function openItemModal(editId) {
       document.getElementById('itemWeight').value = item.weight || '';
       document.getElementById('itemValue').value = item.value_gp ?? '';
       document.getElementById('itemNotes').value = item.notes || '';
+      document.getElementById('itemWeaponDamage').value = item.weapon_damage || '';
+      document.getElementById('itemWeaponAtk').value = item.weapon_atk_bonus ?? '';
+      toggleWeaponFields(item.item_type);
     }
   } else {
     document.getElementById('itemName').value = '';
@@ -3627,9 +4105,18 @@ function openItemModal(editId) {
     document.getElementById('itemWeight').value = '';
     document.getElementById('itemValue').value = '';
     document.getElementById('itemNotes').value = '';
+    document.getElementById('itemWeaponDamage').value = '';
+    document.getElementById('itemWeaponAtk').value = '';
+    toggleWeaponFields('misc');
   }
   document.getElementById('itemModal').classList.remove('hidden');
   setTimeout(() => document.getElementById('itemName').focus(), 50);
+}
+
+function toggleWeaponFields(typeValue) {
+  const fields = document.getElementById('weaponFields');
+  if (!fields) return;
+  fields.classList.toggle('hidden', String(typeValue || '').toLowerCase() !== 'weapon');
 }
 
 function closeItemModal() {
@@ -3647,6 +4134,14 @@ async function saveItem() {
     value_gp: parseFloat(document.getElementById('itemValue').value) ?? null,
     notes: document.getElementById('itemNotes').value.trim(),
   };
+  if (payload.item_type === 'weapon') {
+    payload.weapon_damage = document.getElementById('itemWeaponDamage').value.trim() || null;
+    const atkVal = document.getElementById('itemWeaponAtk').value;
+    payload.weapon_atk_bonus = atkVal === '' ? null : parseInt(atkVal, 10);
+  } else {
+    payload.weapon_damage = null;
+    payload.weapon_atk_bonus = null;
+  }
   try {
     if (editingItemId) {
       const updated = await API.put(`/characters/${charId}/inventory/${editingItemId}`, payload);

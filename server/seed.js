@@ -6,6 +6,7 @@
  */
 
 const db = require('./db');
+const seedEffectDefinitions = require('./effects/seed-effects');
 
 const BASE = 'https://raw.githubusercontent.com/5etools-mirror-3/5etools-2014-src/master/data';
 const HOMEBREW_SUBCLASS_URLS = [
@@ -353,6 +354,7 @@ function resolveSubraceCopy(race, subraceMap, cache) {
   return cloneJSON(result);
 }
 
+
 function buildClassSpecific(cls, level) {
   const specific = {};
   const name = cls.name?.toLowerCase();
@@ -432,6 +434,17 @@ const insertSpell = db.prepare(`
     data_json=excluded.data_json
 `);
 
+const insertWeapon = db.prepare(`
+  INSERT INTO weapons (name, source, category, damage_dice, damage_type, properties_json, data_json)
+  VALUES (@name, @source, @category, @damage_dice, @damage_type, @properties_json, @data_json)
+  ON CONFLICT(name, source) DO UPDATE SET
+    category=excluded.category,
+    damage_dice=excluded.damage_dice,
+    damage_type=excluded.damage_type,
+    properties_json=excluded.properties_json,
+    data_json=excluded.data_json
+`);
+
 const insertFeat = db.prepare(`
   INSERT INTO feats (name, source, prerequisites_json, ability_json, data_json)
   VALUES (@name, @source, @prerequisites_json, @ability_json, @data_json)
@@ -459,6 +472,7 @@ const insertOptionalFeature = db.prepare(`
     prerequisites_json=excluded.prerequisites_json,
     data_json=excluded.data_json
 `);
+
 
 const setSeedMeta = db.prepare(`
   INSERT OR REPLACE INTO seed_meta (key, value, updated_at) VALUES (@key, @value, datetime('now'))
@@ -724,6 +738,32 @@ async function seedSpells() {
   }
 }
 
+async function seedWeapons() {
+  console.log('Seeding weapons...');
+  try {
+    const data = await fetchJSON(`${BASE}/items.json`);
+    for (const item of (data.item || [])) {
+      if (item._copy) continue;
+      const isWeapon = !!(item.weaponCategory || item.type === 'M' || item.type === 'R' || item.weapon);
+      if (!isWeapon) continue;
+      const damageDice = item.dmg1 || item.dmg2 || null;
+      if (!damageDice) continue;
+      const category = item.weaponCategory || (item.type === 'M' ? 'melee' : item.type === 'R' ? 'ranged' : null);
+      insertWeapon.run({
+        name: item.name,
+        source: item.source,
+        category,
+        damage_dice: damageDice,
+        damage_type: item.dmgType || null,
+        properties_json: JSON.stringify(item.property || []),
+        data_json: JSON.stringify(item),
+      });
+    }
+  } catch (err) {
+    console.warn(`  Warning: failed to seed weapons: ${err.message}`);
+  }
+}
+
 async function seedFeats() {
   console.log('Seeding feats...');
   try {
@@ -782,6 +822,7 @@ async function seedOptionalFeatures() {
   }
 }
 
+
 async function seedHomebrewSubclasses() {
   console.log('Seeding homebrew subclasses...');
   for (const url of HOMEBREW_SUBCLASS_URLS) {
@@ -831,10 +872,12 @@ async function main() {
   await seedClasses();
   await seedRaces();
   await seedSpells();
+  await seedWeapons();
   await seedFeats();
   await seedBackgrounds();
   await seedOptionalFeatures();
   await seedHomebrewSubclasses();
+  await seedEffectDefinitions({ allSources: true });
 
   setSeedMeta.run({ key: 'seeded_at', value: new Date().toISOString() });
   setSeedMeta.run({ key: 'source', value: 'github:5etools-mirror-3/5etools-2014-src' });
@@ -846,6 +889,7 @@ async function main() {
   console.log(`  Features:    ${db.prepare('SELECT COUNT(*) as n FROM class_features').get().n}`);
   console.log(`  Races:       ${db.prepare('SELECT COUNT(*) as n FROM races').get().n}`);
   console.log(`  Spells:      ${db.prepare('SELECT COUNT(*) as n FROM spells').get().n}`);
+  console.log(`  Weapons:     ${db.prepare('SELECT COUNT(*) as n FROM weapons').get().n}`);
   console.log(`  Feats:       ${db.prepare('SELECT COUNT(*) as n FROM feats').get().n}`);
   console.log(`  Backgrounds: ${db.prepare('SELECT COUNT(*) as n FROM backgrounds').get().n}`);
   console.log(`  Optional:    ${db.prepare('SELECT COUNT(*) as n FROM optional_features').get().n}`);
