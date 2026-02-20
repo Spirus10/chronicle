@@ -2,7 +2,10 @@
 const express = require('express');
 const db = require('../db');
 const { collectModifiers } = require('../effects/engine');
+const { requireAuth } = require('../auth');
 const router = express.Router();
+
+router.use(requireAuth);
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -11,6 +14,8 @@ function parseChar(row) {
   return {
     id: row.id,
     name: row.name,
+    owner_user_id: row.owner_user_id,
+    campaign_id: row.campaign_id,
     class_id: row.class_id,
     subclass_id: row.subclass_id,
     race_id: row.race_id,
@@ -35,6 +40,19 @@ function parseChar(row) {
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
+}
+
+function getOwnedCharacterId(userId, characterId) {
+  return db.prepare('SELECT id FROM characters WHERE id = ? AND owner_user_id = ?').get(characterId, userId);
+}
+
+function requireOwnedCharacter(req, res) {
+  const row = getOwnedCharacterId(req.user.id, req.params.id);
+  if (!row) {
+    res.status(404).json({ error: 'Character not found' });
+    return null;
+  }
+  return row;
 }
 
 function parseState(row) {
@@ -299,20 +317,21 @@ function validateSpellSelection(classId, level, spellsKnown = []) {
 // ── GET /api/characters ────────────────────────────────────────
 router.get('/', (req, res) => {
   const rows = db.prepare(`
-    SELECT c.id, c.name, c.level, c.alignment, c.portrait_url,
+    SELECT c.id, c.name, c.level, c.alignment, c.portrait_url, c.campaign_id,
            c.class_id, c.subclass_id, c.race_id, c.background_id,
            c.experience_points, c.created_at, c.updated_at,
-           c.stat_overrides_json,
-           cl.name as class_name, sc.name as subclass_name,
-           r.name as race_name,
-           cs.hp_current, cs.hp_temp
+            c.stat_overrides_json,
+            cl.name as class_name, sc.name as subclass_name,
+            r.name as race_name,
+            cs.hp_current, cs.hp_temp
     FROM characters c
     LEFT JOIN classes cl ON c.class_id = cl.id
     LEFT JOIN subclasses sc ON c.subclass_id = sc.id
     LEFT JOIN races r ON c.race_id = r.id
     LEFT JOIN character_state cs ON c.id = cs.character_id
+    WHERE c.owner_user_id = ?
     ORDER BY c.updated_at DESC
-  `).all();
+  `).all(req.user.id);
   const parsed = rows.map(r => {
     const overrides = JSON.parse(r.stat_overrides_json || '{}');
     const { stat_overrides_json, ...rest } = r;
@@ -374,18 +393,18 @@ router.post('/', (req, res) => {
   }
 
   const insertChar = db.prepare(`
-    INSERT INTO characters (name, class_id, subclass_id, race_id, background_id, level,
+    INSERT INTO characters (name, owner_user_id, class_id, subclass_id, race_id, background_id, level,
       experience_points, alignment, ability_scores_json, stat_overrides_json,
       skill_proficiencies_json, spellcasting_type, spellbook_json, spells_known_json,
       feats_json, backstory, personality_traits, ideals, bonds, flaws, appearance, portrait_url)
-    VALUES (@name, @class_id, @subclass_id, @race_id, @background_id, @level,
+    VALUES (@name, @owner_user_id, @class_id, @subclass_id, @race_id, @background_id, @level,
       @experience_points, @alignment, @ability_scores_json, @stat_overrides_json,
       @skill_proficiencies_json, @spellcasting_type, @spellbook_json, @spells_known_json,
       @feats_json, @backstory, @personality_traits, @ideals, @bonds, @flaws, @appearance, @portrait_url)
   `);
 
   const result = insertChar.run({
-    name, class_id: class_id ?? null, subclass_id: subclass_id ?? null,
+    name, owner_user_id: req.user.id, class_id: class_id ?? null, subclass_id: subclass_id ?? null,
     race_id: race_id ?? null, background_id: background_id ?? null,
     level, experience_points, alignment: alignment ?? null,
     ability_scores_json: JSON.stringify(ability_scores),
@@ -432,14 +451,14 @@ router.post('/', (req, res) => {
 
 // ── GET /api/characters/:id ────────────────────────────────────
 router.get('/:id', (req, res) => {
-  const row = db.prepare('SELECT * FROM characters WHERE id = ?').get(req.params.id);
+  const row = db.prepare('SELECT * FROM characters WHERE id = ? AND owner_user_id = ?').get(req.params.id, req.user.id);
   if (!row) return res.status(404).json({ error: 'Character not found' });
   res.json(enrichCharacter(parseChar(row)));
 });
 
 // ── PUT /api/characters/:id ────────────────────────────────────
 router.put('/:id', (req, res) => {
-  const rowExisting = db.prepare('SELECT * FROM characters WHERE id = ?').get(req.params.id);
+  const rowExisting = db.prepare('SELECT * FROM characters WHERE id = ? AND owner_user_id = ?').get(req.params.id, req.user.id);
   const existing = rowExisting ? parseChar(rowExisting) : null;
   if (!existing) return res.status(404).json({ error: 'Character not found' });
 
@@ -478,22 +497,23 @@ router.put('/:id', (req, res) => {
   updates.push(`updated_at = datetime('now')`);
   params.id = req.params.id;
 
-  db.prepare(`UPDATE characters SET ${updates.join(', ')} WHERE id = @id`).run(params);
+  db.prepare(`UPDATE characters SET ${updates.join(', ')} WHERE id = @id AND owner_user_id = @owner_user_id`).run({ ...params, owner_user_id: req.user.id });
 
-  const row = db.prepare('SELECT * FROM characters WHERE id = ?').get(req.params.id);
+  const row = db.prepare('SELECT * FROM characters WHERE id = ? AND owner_user_id = ?').get(req.params.id, req.user.id);
   res.json(enrichCharacter(parseChar(row)));
 });
 
 // ── DELETE /api/characters/:id ────────────────────────────────
 router.delete('/:id', (req, res) => {
-  const existing = db.prepare('SELECT id FROM characters WHERE id = ?').get(req.params.id);
+  const existing = db.prepare('SELECT id FROM characters WHERE id = ? AND owner_user_id = ?').get(req.params.id, req.user.id);
   if (!existing) return res.status(404).json({ error: 'Character not found' });
-  db.prepare('DELETE FROM characters WHERE id = ?').run(req.params.id);
+  db.prepare('DELETE FROM characters WHERE id = ? AND owner_user_id = ?').run(req.params.id, req.user.id);
   res.json({ ok: true });
 });
 
 // ── GET /api/characters/:id/state ────────────────────────────
 router.get('/:id/state', (req, res) => {
+  if (!requireOwnedCharacter(req, res)) return;
   const row = db.prepare('SELECT * FROM character_state WHERE character_id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'State not found' });
   res.json(parseState(row));
@@ -501,6 +521,7 @@ router.get('/:id/state', (req, res) => {
 
 // ── PUT /api/characters/:id/state ────────────────────────────
 router.put('/:id/state', (req, res) => {
+  if (!requireOwnedCharacter(req, res)) return;
   const charId = req.params.id;
   const existing = db.prepare('SELECT character_id FROM character_state WHERE character_id = ?').get(charId);
 
@@ -550,7 +571,7 @@ router.put('/:id/state', (req, res) => {
 
 // ── GET /api/characters/:id/effects ───────────────────────────
 router.get('/:id/effects', (req, res) => {
-  const row = db.prepare('SELECT * FROM characters WHERE id = ?').get(req.params.id);
+  const row = db.prepare('SELECT * FROM characters WHERE id = ? AND owner_user_id = ?').get(req.params.id, req.user.id);
   if (!row) return res.status(404).json({ error: 'Character not found' });
 
   const char = enrichCharacter(parseChar(row));
@@ -569,7 +590,7 @@ router.get('/:id/effects', (req, res) => {
 
 // ── POST /api/characters/:id/effects/resolve ──────────────────
 router.post('/:id/effects/resolve', (req, res) => {
-  const row = db.prepare('SELECT * FROM characters WHERE id = ?').get(req.params.id);
+  const row = db.prepare('SELECT * FROM characters WHERE id = ? AND owner_user_id = ?').get(req.params.id, req.user.id);
   if (!row) return res.status(404).json({ error: 'Character not found' });
 
   const char = enrichCharacter(parseChar(row));
@@ -613,6 +634,7 @@ router.post('/:id/effects/resolve', (req, res) => {
 
 // ── GET /api/characters/:id/inventory ─────────────────────────
 router.get('/:id/inventory', (req, res) => {
+  if (!requireOwnedCharacter(req, res)) return;
   const rows = db.prepare(`
     SELECT * FROM inventory WHERE character_id = ? ORDER BY sort_order, created_at
   `).all(req.params.id);
@@ -621,6 +643,7 @@ router.get('/:id/inventory', (req, res) => {
 
 // ── POST /api/characters/:id/inventory ────────────────────────
 router.post('/:id/inventory', (req, res) => {
+  if (!requireOwnedCharacter(req, res)) return;
   const { name, quantity=1, weight, value_gp, equipped=false, item_type='misc', notes='', weapon_damage = null, weapon_atk_bonus = null } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
 
@@ -638,6 +661,7 @@ router.post('/:id/inventory', (req, res) => {
 
 // ── PUT /api/characters/:id/inventory/:itemId ─────────────────
 router.put('/:id/inventory/:itemId', (req, res) => {
+  if (!requireOwnedCharacter(req, res)) return;
   const existing = db.prepare('SELECT id FROM inventory WHERE id = ? AND character_id = ?').get(req.params.itemId, req.params.id);
   if (!existing) return res.status(404).json({ error: 'Item not found' });
 
@@ -665,6 +689,7 @@ router.put('/:id/inventory/:itemId', (req, res) => {
 
 // ── DELETE /api/characters/:id/inventory/:itemId ──────────────
 router.delete('/:id/inventory/:itemId', (req, res) => {
+  if (!requireOwnedCharacter(req, res)) return;
   const existing = db.prepare('SELECT id FROM inventory WHERE id = ? AND character_id = ?').get(req.params.itemId, req.params.id);
   if (!existing) return res.status(404).json({ error: 'Item not found' });
   db.prepare('DELETE FROM inventory WHERE id = ?').run(req.params.itemId);
@@ -673,12 +698,14 @@ router.delete('/:id/inventory/:itemId', (req, res) => {
 
 // ── GET /api/characters/:id/currency ─────────────────────────
 router.get('/:id/currency', (req, res) => {
+  if (!requireOwnedCharacter(req, res)) return;
   const row = db.prepare('SELECT * FROM currency WHERE character_id = ?').get(req.params.id);
   res.json(row || { character_id: parseInt(req.params.id), cp:0, sp:0, ep:0, gp:0, pp:0 });
 });
 
 // ── PUT /api/characters/:id/currency ─────────────────────────
 router.put('/:id/currency', (req, res) => {
+  if (!requireOwnedCharacter(req, res)) return;
   const charId = req.params.id;
   const { cp=0, sp=0, ep=0, gp=0, pp=0 } = req.body;
 

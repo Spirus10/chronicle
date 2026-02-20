@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DM Dashboard - Chronicle</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#13111a;--card:#1c1926;--paper:#262133;--border:#3e3756;--text:#efe8ff;--dim:#a29bb6;--gold:#bfa0ff;--green:#4fc08a;--red:#c34848}
+body{font-family:'Iowan Old Style','Palatino Linotype','Book Antiqua','Garamond',serif;background:radial-gradient(circle at 15% 0%,#2a2440 0%,#13111a 42%,#0e0c14 100%);color:var(--text);min-height:100vh}
+.wrap{max-width:1080px;margin:0 auto;padding:22px 16px 60px}
+.head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.title{font-size:34px;letter-spacing:5px;color:var(--gold)}
+.sub{font-size:11px;letter-spacing:2px;color:var(--dim);text-transform:uppercase}
+.row{display:flex;gap:8px;align-items:center}
+.btn{padding:7px 12px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--dim);cursor:pointer;font-size:12px;letter-spacing:.7px;text-decoration:none}
+.btn-gold{border-color:rgba(191,160,255,.4);background:rgba(191,160,255,.1);color:var(--gold)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:18px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px}
+.card-title{font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--dim);margin-bottom:10px}
+.field{margin-bottom:10px}
+.field input,.field textarea{width:100%;background:var(--paper);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 10px;font-size:14px;font-family:inherit;outline:none}
+.field textarea{min-height:70px;resize:vertical}
+.campaign{border:1px solid var(--border);background:var(--paper);border-radius:8px;padding:10px;margin-bottom:8px}
+.campaign h4{font-size:16px;color:var(--gold)}
+.meta{font-size:11px;color:var(--dim);margin-top:5px}
+.chars{margin-top:10px;display:grid;gap:6px}
+.char{display:flex;justify-content:space-between;gap:8px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:#211d2e}
+.tools{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.tool{padding:10px;border:1px dashed var(--border);border-radius:8px;background:rgba(255,255,255,.02)}
+.tool h5{font-size:12px;color:var(--gold);margin-bottom:4px}
+.tool p{font-size:11px;color:var(--dim)}
+.status{font-size:12px;min-height:16px;color:var(--green);margin-top:8px}
+.err{color:var(--red)}
+@media (max-width:900px){.grid{grid-template-columns:1fr}.tools{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <div>
+      <div class="title">CHRONICLE</div>
+      <div class="sub" id="who">DM Dashboard</div>
+    </div>
+    <div class="row">
+      <a href="/" class="btn">Player View</a>
+      <button class="btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+
+  <div class="grid">
+    <section class="card">
+      <div class="card-title">Create Campaign</div>
+      <div class="field"><input id="name" placeholder="Campaign name"></div>
+      <div class="field"><textarea id="description" placeholder="Campaign description (optional)"></textarea></div>
+      <button class="btn btn-gold" onclick="createCampaign()">Create Campaign</button>
+      <div class="status" id="createStatus"></div>
+    </section>
+
+    <section class="card">
+      <div class="card-title">DM Tools Scaffold</div>
+      <div class="tools">
+        <div class="tool"><h5>Encounter Tracker</h5><p>Initiative timeline, HP pools, and effect windows.</p></div>
+        <div class="tool"><h5>Session Notes</h5><p>Prep notes, NPC beats, and reminders.</p></div>
+        <div class="tool"><h5>Campaign Timeline</h5><p>Events, quests, and milestone history.</p></div>
+      </div>
+    </section>
+  </div>
+
+  <section class="card" style="margin-top:14px">
+    <div class="card-title">My Campaigns</div>
+    <div id="campaigns">Loading...</div>
+  </section>
+</div>
+
+<script src="/js/shared.js"></script>
+<script>
+let campaigns = [];
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+async function logout() {
+  await Auth.logout();
+  location.href = '/login.html';
+}
+
+async function ensureDM() {
+  const me = await Auth.me();
+  if (me.user.role !== 'dm') {
+    location.href = '/';
+    return null;
+  }
+  document.getElementById('who').textContent = `DM Dashboard - ${me.user.username}`;
+  return me.user;
+}
+
+async function loadCampaigns() {
+  campaigns = await API.get('/campaigns/mine');
+  const root = document.getElementById('campaigns');
+  if (!campaigns.length) {
+    root.innerHTML = '<div class="meta">No campaigns yet. Create your first one above.</div>';
+    return;
+  }
+
+  const blocks = await Promise.all(campaigns.map(async c => {
+    const chars = await API.get(`/campaigns/${c.id}/characters`).catch(() => []);
+    const charHtml = !chars.length
+      ? '<div class="meta">No characters attached yet.</div>'
+      : `<div class="chars">${chars.map(ch => `<div class="char"><span>${escapeHtml(ch.name)} (Lvl ${Number(ch.level || 0)})</span><span class="meta">${escapeHtml(ch.owner_username || 'unknown')} · ${escapeHtml(ch.race_name || 'Unknown')} ${escapeHtml(ch.class_name || '')}</span></div>`).join('')}</div>`;
+    return `
+      <div class="campaign">
+        <h4>${escapeHtml(c.name)}</h4>
+        <div class="meta">Join Code: <strong>${escapeHtml(c.join_code)}</strong> · Players: ${Number(c.player_count || 0)}</div>
+        ${c.description ? `<div class="meta">${escapeHtml(c.description)}</div>` : ''}
+        ${charHtml}
+      </div>
+    `;
+  }));
+
+  root.innerHTML = blocks.join('');
+}
+
+async function createCampaign() {
+  const name = document.getElementById('name').value.trim();
+  const description = document.getElementById('description').value.trim();
+  const status = document.getElementById('createStatus');
+  status.classList.remove('err');
+  if (!name) {
+    status.textContent = 'Campaign name is required.';
+    status.classList.add('err');
+    return;
+  }
+  try {
+    await API.post('/campaigns', { name, description });
+    document.getElementById('name').value = '';
+    document.getElementById('description').value = '';
+    status.textContent = 'Campaign created.';
+    await loadCampaigns();
+  } catch (err) {
+    status.textContent = err.message;
+    status.classList.add('err');
+  }
+}
+
+(async function init() {
+  try {
+    const user = await ensureDM();
+    if (!user) return;
+    await loadCampaigns();
+  } catch (_e) {
+    location.href = '/login.html';
+  }
+})();
+</script>
+</body>
+</html>

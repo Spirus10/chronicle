@@ -144,11 +144,48 @@ function migrate() {
       UNIQUE(source_type, source_id, name)
     );
 
+    CREATE TABLE IF NOT EXISTS users (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      username     TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      role         TEXT NOT NULL CHECK(role IN ('dm', 'player')),
+      created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS sessions (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash    TEXT NOT NULL UNIQUE,
+      expires_at    TEXT NOT NULL,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS campaigns (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      name          TEXT NOT NULL,
+      description   TEXT NOT NULL DEFAULT '',
+      join_code     TEXT NOT NULL UNIQUE,
+      dm_user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS campaign_members (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      campaign_id    INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+      player_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      joined_at      TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(campaign_id, player_user_id)
+    );
+
     -- ── USER DATA ─────────────────────────────────────────────────
 
     CREATE TABLE IF NOT EXISTS characters (
       id                     INTEGER PRIMARY KEY AUTOINCREMENT,
       name                   TEXT NOT NULL,
+      owner_user_id          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      campaign_id            INTEGER REFERENCES campaigns(id) ON DELETE SET NULL,
       class_id               INTEGER REFERENCES classes(id),
       subclass_id            INTEGER REFERENCES subclasses(id),
       race_id                INTEGER REFERENCES races(id),
@@ -253,6 +290,19 @@ function migrate() {
   }
   if (!inventoryCols.includes('weapon_atk_bonus')) {
     db.exec('ALTER TABLE inventory ADD COLUMN weapon_atk_bonus INTEGER');
+  }
+
+  const characterCols = db.prepare('PRAGMA table_info(characters)').all().map(c => c.name);
+  if (!characterCols.includes('owner_user_id')) {
+    db.exec('ALTER TABLE characters ADD COLUMN owner_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL');
+  }
+  if (!characterCols.includes('campaign_id')) {
+    db.exec('ALTER TABLE characters ADD COLUMN campaign_id INTEGER REFERENCES campaigns(id) ON DELETE SET NULL');
+  }
+
+  const userCols = db.prepare('PRAGMA table_info(users)').all().map(c => c.name);
+  if (userCols.length && !userCols.includes('username')) {
+    db.exec('ALTER TABLE users ADD COLUMN username TEXT');
   }
 }
 

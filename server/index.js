@@ -4,12 +4,14 @@ const cors = require('cors');
 const path = require('path');
 const db = require('./db');
 const seedEffectDefinitions = require('./effects/seed-effects');
+const { authMiddleware, cleanupExpiredSessions } = require('./auth');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
+app.use(authMiddleware);
 
 // Static frontend
 app.use(express.static(path.join(__dirname, '..', 'public')));
@@ -21,6 +23,9 @@ app.use('/api/spells', require('./routes/spells'));
 app.use('/api/feats', require('./routes/feats'));
 app.use('/api/backgrounds', require('./routes/backgrounds'));
 app.use('/api/optional-features', require('./routes/optional-features'));
+app.use('/api/auth', require('./routes/auth'));
+app.use('/api/campaigns', require('./routes/campaigns'));
+app.use('/api/dm-tools', require('./routes/dm-tools'));
 app.use('/api/characters', require('./routes/characters'));
 
 // Seed status endpoint
@@ -47,6 +52,7 @@ app.get('*', (req, res) => {
 
 // Auto-seed check on startup
 async function checkAndSeed() {
+  cleanupExpiredSessions();
   const seeded = db.prepare("SELECT value FROM seed_meta WHERE key = 'seeded_at'").get();
   if (!seeded) {
     console.log('Database not seeded. Running seed script...');

@@ -4,40 +4,55 @@
    ================================================================ */
 
 // ── API ──────────────────────────────────────────────────────────
+async function apiRequest(path, options = {}) {
+  const r = await fetch(`/api${path}`, options);
+  if (r.status === 401 && !location.pathname.endsWith('/login.html')) {
+    const next = encodeURIComponent(location.pathname + location.search);
+    location.href = `/login.html?next=${next}`;
+    throw new Error('Authentication required');
+  }
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    throw new Error(err.error || `${options.method || 'GET'} ${path} -> ${r.status}`);
+  }
+  return r.json();
+}
+
 const API = {
   async get(path) {
-    const r = await fetch(`/api${path}`);
-    if (!r.ok) throw new Error(`GET ${path} → ${r.status}`);
-    return r.json();
+    return apiRequest(path, { method: 'GET' });
   },
   async post(path, body) {
-    const r = await fetch(`/api${path}`, {
+    return apiRequest(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!r.ok) {
-      const err = await r.json().catch(() => ({}));
-      throw new Error(err.error || `POST ${path} → ${r.status}`);
-    }
-    return r.json();
   },
   async put(path, body) {
-    const r = await fetch(`/api${path}`, {
+    return apiRequest(path, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!r.ok) {
-      const err = await r.json().catch(() => ({}));
-      throw new Error(err.error || `PUT ${path} → ${r.status}`);
-    }
-    return r.json();
   },
   async del(path) {
-    const r = await fetch(`/api${path}`, { method: 'DELETE' });
-    if (!r.ok) throw new Error(`DELETE ${path} → ${r.status}`);
-    return r.json();
+    return apiRequest(path, { method: 'DELETE' });
+  },
+};
+
+const Auth = {
+  me() {
+    return API.get('/auth/me');
+  },
+  login(payload) {
+    return API.post('/auth/login', payload);
+  },
+  register(payload) {
+    return API.post('/auth/register', payload);
+  },
+  logout() {
+    return API.post('/auth/logout', {});
   },
 };
 

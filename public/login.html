@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Login - Chronicle</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#111015;--card:#1a1822;--border:#3a3550;--text:#eee8ff;--dim:#a29bb6;--gold:#bfa0ff;--green:#4fc08a;--red:#c34848}
+body{font-family:'Iowan Old Style','Palatino Linotype','Book Antiqua','Garamond',serif;background:radial-gradient(circle at 10% 10%,#241f32 0%,#111015 45%,#0b0a10 100%);color:var(--text);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}
+.card{width:min(460px,100%);background:var(--card);border:1px solid var(--border);border-radius:12px;padding:26px 22px;box-shadow:0 16px 45px rgba(0,0,0,.45)}
+.title{text-align:center;font-size:34px;letter-spacing:5px;color:var(--gold)}
+.sub{text-align:center;margin-top:6px;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--dim)}
+.tabs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:22px}
+.tab{padding:8px 10px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--dim);cursor:pointer;font-size:12px;letter-spacing:1px}
+.tab.active{color:var(--gold);border-color:rgba(191,160,255,.5);background:rgba(191,160,255,.1)}
+.field{margin-top:12px}
+.field label{display:block;font-size:10px;letter-spacing:1.4px;text-transform:uppercase;color:var(--dim);margin-bottom:5px}
+.field input,.field select{width:100%;background:#15131d;border:1px solid var(--border);border-radius:6px;color:var(--text);padding:9px 10px;font-size:14px;font-family:inherit;outline:none}
+.hint{font-size:10px;color:var(--dim);margin-top:4px}
+.btn{margin-top:16px;width:100%;padding:10px;border-radius:6px;border:1px solid rgba(191,160,255,.45);background:rgba(191,160,255,.12);color:var(--gold);font-size:13px;letter-spacing:.8px;cursor:pointer}
+.btn:disabled{opacity:.5;cursor:default}
+.status{margin-top:12px;font-size:12px;min-height:18px}
+.ok{color:var(--green)}.err{color:var(--red)}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="title">CHRONICLE</div>
+  <div class="sub">Sign in or create account</div>
+  <div class="tabs">
+    <button class="tab active" id="loginTab" onclick="setMode('login')">Login</button>
+    <button class="tab" id="registerTab" onclick="setMode('register')">Register</button>
+  </div>
+
+  <div class="field">
+    <label>Username</label>
+    <input id="username" type="text" autocomplete="username" placeholder="e.g. stormseer_dm">
+  </div>
+  <div class="field">
+    <label>Password</label>
+    <input id="password" type="password" autocomplete="current-password" placeholder="At least 8 characters">
+  </div>
+  <div class="field" id="roleField" style="display:none">
+    <label>Account Type</label>
+    <select id="role">
+      <option value="player">Player</option>
+      <option value="dm">DM</option>
+    </select>
+    <div class="hint">DM accounts can create campaigns and view all campaign characters.</div>
+  </div>
+  <button class="btn" id="submitBtn" onclick="submitAuth()">Login</button>
+  <div class="status" id="status"></div>
+</div>
+
+<script src="/js/shared.js"></script>
+<script>
+let mode = 'login';
+const params = new URLSearchParams(location.search);
+const next = params.get('next') || '/';
+
+function setMode(nextMode) {
+  mode = nextMode;
+  document.getElementById('loginTab').classList.toggle('active', mode === 'login');
+  document.getElementById('registerTab').classList.toggle('active', mode === 'register');
+  document.getElementById('roleField').style.display = mode === 'register' ? '' : 'none';
+  document.getElementById('submitBtn').textContent = mode === 'register' ? 'Create Account' : 'Login';
+  document.getElementById('status').textContent = '';
+}
+
+async function submitAuth() {
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value;
+  const role = document.getElementById('role').value;
+  const status = document.getElementById('status');
+  const btn = document.getElementById('submitBtn');
+  status.className = 'status';
+
+  if (username.length < 3) {
+    status.textContent = 'Username must be at least 3 characters.';
+    status.classList.add('err');
+    return;
+  }
+  if (password.length < 8) {
+    status.textContent = 'Password must be at least 8 characters.';
+    status.classList.add('err');
+    return;
+  }
+
+  try {
+    btn.disabled = true;
+    if (mode === 'register') await Auth.register({ username, password, role });
+    else await Auth.login({ username, password });
+    const me = await Auth.me();
+    status.textContent = 'Success. Redirecting...';
+    status.classList.add('ok');
+    if (me.user.role === 'dm') location.href = '/dm.html';
+    else location.href = next;
+  } catch (err) {
+    status.textContent = err.message || 'Authentication failed.';
+    status.classList.add('err');
+    btn.disabled = false;
+  }
+}
+
+(async function init() {
+  try {
+    const me = await Auth.me();
+    if (me.user.role === 'dm') location.href = '/dm.html';
+    else location.href = '/';
+  } catch (_e) {}
+})();
+</script>
+</body>
+</html>

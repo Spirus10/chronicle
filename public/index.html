@@ -24,6 +24,13 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 /* Section header */
 .section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
 .section-title{font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--dim)}
+.account-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:16px}
+.account-meta{font-size:11px;color:var(--dim);letter-spacing:1px}
+.campaign-panel{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:18px;box-shadow:0 6px 18px var(--shadow)}
+.campaign-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
+.campaign-input{flex:1;min-width:180px;background:var(--paper);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:8px 10px;font-size:13px;font-family:inherit;outline:none}
+.campaign-select{min-width:160px;background:var(--paper);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:8px 10px;font-size:13px;font-family:inherit;outline:none}
+.campaign-chip{display:inline-flex;align-items:center;gap:8px;padding:5px 8px;border-radius:999px;border:1px solid var(--border);background:var(--paper);font-size:11px;color:var(--text);margin:4px 6px 0 0}
 
 /* Buttons */
 .btn{padding:8px 16px;border-radius:4px;font-size:12px;font-family:inherit;cursor:pointer;transition:all 0.2s;white-space:nowrap;letter-spacing:0.5px;border:1px solid}
@@ -82,6 +89,30 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
   <div class="site-sub">D&amp;D 5e Character Tracker</div>
 </div>
 
+<div class="account-row">
+  <div class="account-meta" id="accountMeta">Loading account...</div>
+  <div>
+    <a href="/dm.html" id="dmDashBtn" class="btn btn-dim hidden">DM Dashboard</a>
+    <button class="btn btn-dim" onclick="logout()">Logout</button>
+  </div>
+</div>
+
+<div class="campaign-panel">
+  <div class="section-title">Campaigns</div>
+  <div class="campaign-row">
+    <input id="joinCode" class="campaign-input" placeholder="Enter join code">
+    <button class="btn btn-gold" onclick="joinCampaign()">Join Campaign</button>
+  </div>
+  <div id="campaignStatus" class="char-meta" style="margin-top:8px"></div>
+  <div id="campaignList" style="margin-top:8px"></div>
+  <div class="campaign-row">
+    <select id="assignChar" class="campaign-select"></select>
+    <select id="assignCampaign" class="campaign-select"></select>
+    <button class="btn btn-gold" onclick="attachCharacter()">Attach</button>
+    <button class="btn btn-dim" onclick="detachCharacter()">Detach</button>
+  </div>
+</div>
+
 <div class="section-header">
   <div class="section-title">Your Characters</div>
   <a href="/builder.html" class="btn btn-gold">+ New Character</a>
@@ -108,11 +139,113 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 <script src="/js/shared.js"></script>
 <script>
 let deleteTarget = null;
+let currentUser = null;
+let joinedCampaigns = [];
+let rosterChars = [];
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+async function ensureAuth() {
+  const me = await Auth.me();
+  currentUser = me.user;
+  if (currentUser.role === 'dm') {
+    location.href = '/dm.html';
+    return false;
+  }
+  document.getElementById('accountMeta').textContent = `Signed in as ${currentUser.username} (${currentUser.role.toUpperCase()})`;
+  return true;
+}
+
+async function logout() {
+  await Auth.logout();
+  location.href = '/login.html';
+}
+
+async function loadCampaigns() {
+  const root = document.getElementById('campaignList');
+  joinedCampaigns = await API.get('/campaigns/joined').catch(() => []);
+  if (!joinedCampaigns.length) {
+    root.innerHTML = '<div class="char-meta">Not in a campaign yet. Ask your DM for a join code.</div>';
+    return;
+  }
+  root.innerHTML = joinedCampaigns
+    .map(c => `<span class="campaign-chip">${escapeHtml(c.name)} <strong>${escapeHtml(c.join_code)}</strong></span>`)
+    .join('');
+  renderAssignControls();
+}
+
+function renderAssignControls() {
+  const charSel = document.getElementById('assignChar');
+  const campSel = document.getElementById('assignCampaign');
+  if (!charSel || !campSel) return;
+  charSel.innerHTML = rosterChars.length
+    ? rosterChars.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')
+    : '<option value="">No characters</option>';
+  campSel.innerHTML = joinedCampaigns.length
+    ? joinedCampaigns.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')
+    : '<option value="">No campaigns</option>';
+}
+
+async function attachCharacter() {
+  const charId = document.getElementById('assignChar').value;
+  const campaignId = document.getElementById('assignCampaign').value;
+  const status = document.getElementById('campaignStatus');
+  if (!charId || !campaignId) return;
+  try {
+    await API.post(`/campaigns/${campaignId}/characters/${charId}/attach`, {});
+    status.textContent = 'Character attached to campaign.';
+    await loadRoster();
+  } catch (err) {
+    status.textContent = err.message;
+  }
+}
+
+async function detachCharacter() {
+  const charId = document.getElementById('assignChar').value;
+  const status = document.getElementById('campaignStatus');
+  const target = rosterChars.find(c => String(c.id) === String(charId));
+  if (!target?.campaign_id) {
+    status.textContent = 'Selected character is not attached to a campaign.';
+    return;
+  }
+  try {
+    await API.post(`/campaigns/${target.campaign_id}/characters/${charId}/detach`, {});
+    status.textContent = 'Character detached from campaign.';
+    await loadRoster();
+  } catch (err) {
+    status.textContent = err.message;
+  }
+}
+
+async function joinCampaign() {
+  const input = document.getElementById('joinCode');
+  const status = document.getElementById('campaignStatus');
+  const join_code = input.value.trim();
+  if (!join_code) return;
+  try {
+    await API.post('/campaigns/join', { join_code });
+    input.value = '';
+    status.textContent = 'Joined campaign.';
+    await loadCampaigns();
+    await loadRoster();
+  } catch (err) {
+    status.textContent = err.message;
+  }
+}
 
 async function loadRoster() {
   const grid = document.getElementById('rosterGrid');
   try {
     const chars = await API.get('/characters');
+    rosterChars = chars;
+    renderAssignControls();
     if (!chars.length) {
       grid.innerHTML = `
         <div class="empty-state" style="grid-column:1/-1">
@@ -144,6 +277,12 @@ function renderCard(c) {
   const lvl = `Level ${c.level}`;
   const bg = c.background_name ? ` · ${c.background_name}` : '';
   const updated = c.updated_at ? new Date(c.updated_at).toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'}) : '';
+  const campaign = joinedCampaigns.find(j => j.id === c.campaign_id);
+  const safeName = escapeHtml(c.name || 'Unnamed Character');
+  const safeSubtitle = escapeHtml(subtitle || 'Unknown');
+  const safeLvl = escapeHtml(lvl);
+  const safeBg = escapeHtml(bg);
+  const safeUpdated = escapeHtml(updated);
 
   const hpColor = hp === '?' ? '#5a5040' : (hp <= (hpMax ?? hp) / 2 ? '#8b2020' : '#cc5555');
   const hpPct = (hp !== '?' && hpMax) ? Math.min(100, (hp / hpMax) * 100) : 100;
@@ -151,25 +290,26 @@ function renderCard(c) {
   return `
     <a href="/sheet.html?id=${c.id}" class="char-card">
       <div class="card-actions">
-        <button class="btn btn-dim" style="padding:3px 8px;font-size:10px;border-radius:3px" onclick="event.preventDefault();openDeleteModal(${c.id},'${c.name.replace(/'/g,"\\'")}')">✕</button>
+        <button class="btn btn-dim" style="padding:3px 8px;font-size:10px;border-radius:3px" onclick="event.preventDefault();openDeleteModal(${c.id},'${safeName.replace(/'/g,"\\'")}')">✕</button>
       </div>
-      <div class="char-name">${c.name}</div>
-      <div class="char-subtitle">${subtitle || 'Unknown'} · ${lvl}${bg}</div>
+      <div class="char-name">${safeName}</div>
+      <div class="char-subtitle">${safeSubtitle} · ${safeLvl}${safeBg}</div>
       <div class="char-stats">
         <div class="char-stat">
           <div class="char-stat-val" style="color:${hpColor}">${hp}${hpMax ? `<span style="font-size:13px;color:var(--dim)">/${hpMax}</span>` : ''}${hpTemp > 0 ? `<span style="color:var(--purple);font-size:13px">+${hpTemp}</span>` : ''}</div>
           <div class="char-stat-lbl">HP</div>
         </div>
         <div class="char-stat">
-          <div class="char-stat-val">${c.level}</div>
+          <div class="char-stat-val">${Number(c.level || 1)}</div>
           <div class="char-stat-lbl">Level</div>
         </div>
-        ${c.alignment ? `<div class="char-stat"><div class="char-stat-val" style="font-size:12px;letter-spacing:1px">${c.alignment.split(' ').map(w=>w[0]).join('')}</div><div class="char-stat-lbl">Align</div></div>` : ''}
+        ${c.alignment ? `<div class="char-stat"><div class="char-stat-val" style="font-size:12px;letter-spacing:1px">${escapeHtml(c.alignment.split(' ').map(w=>w[0]).join(''))}</div><div class="char-stat-lbl">Align</div></div>` : ''}
       </div>
       <div class="char-hp-bar">
         <div class="char-hp-fill" style="width:${hpPct}%;background:linear-gradient(90deg,#4a1a1a,${hpColor})"></div>
       </div>
-      <div class="char-meta">Last played ${updated}</div>
+      <div class="char-meta">Last played ${safeUpdated}</div>
+      ${campaign ? `<div class="char-meta">Campaign: ${escapeHtml(campaign.name)}</div>` : ''}
     </a>
   `;
 }
@@ -197,7 +337,16 @@ async function confirmDelete() {
   }
 }
 
-loadRoster();
+(async function init() {
+  try {
+    const ok = await ensureAuth();
+    if (!ok) return;
+    await loadCampaigns();
+    await loadRoster();
+  } catch (_e) {
+    location.href = '/login.html';
+  }
+})();
 </script>
 </body>
 </html>
