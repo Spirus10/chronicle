@@ -1,3 +1,7 @@
+/**
+ * @fileoverview DM tools API routes.
+ * Scaffold for future DM-specific endpoints (encounters, initiative, session notes).
+ */
 'use strict';
 const express = require('express');
 const { requireAuth, requireRole } = require('../auth');

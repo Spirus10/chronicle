@@ -1,6 +1,11 @@
+/**
+ * @fileoverview Race API routes.
+ * Provides read-only access to race and subrace data.
+ */
 'use strict';
 const express = require('express');
 const db = require('../db');
+const { parseJSON } = require('../utils/json-parser');
 const router = express.Router();
 
 // GET /api/races — list all (base races + subraces)
@@ -11,9 +16,9 @@ router.get('/', (req, res) => {
   `).all();
   res.json(rows.map(r => ({
     ...r,
-    speed: JSON.parse(r.speed_json || '{}'),
-    ability: JSON.parse(r.ability_json || '[]'),
-    trait_tags: JSON.parse(r.trait_tags || '[]'),
+    speed: parseJSON(r.speed_json),
+    ability: parseJSON(r.ability_json, []),
+    trait_tags: parseJSON(r.trait_tags, []),
     speed_json: undefined,
     ability_json: undefined,
   })));
@@ -38,10 +43,10 @@ router.get('/:id', (req, res) => {
     source: race.source,
     parent_race_id: race.parent_race_id,
     darkvision: race.darkvision,
-    speed: JSON.parse(race.speed_json || '{}'),
-    ability: JSON.parse(race.ability_json || '[]'),
-    trait_tags: JSON.parse(race.trait_tags || '[]'),
-    data: JSON.parse(race.data_json),
+    speed: parseJSON(race.speed_json),
+    ability: parseJSON(race.ability_json, []),
+    trait_tags: parseJSON(race.trait_tags, []),
+    data: parseJSON(race.data_json),
     subraces,
   });
 });

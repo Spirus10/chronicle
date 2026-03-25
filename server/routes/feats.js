@@ -1,6 +1,11 @@
+/**
+ * @fileoverview Feat API routes.
+ * Provides searchable read-only access to feat data.
+ */
 'use strict';
 const express = require('express');
 const db = require('../db');
+const { parseJSON } = require('../utils/json-parser');
 const router = express.Router();
 
 // GET /api/feats?search=alert
@@ -23,8 +28,8 @@ router.get('/', (req, res) => {
     id: r.id,
     name: r.name,
     source: r.source,
-    prerequisites: JSON.parse(r.prerequisites_json || '[]'),
-    ability: JSON.parse(r.ability_json || '[]'),
+    prerequisites: parseJSON(r.prerequisites_json, []),
+    ability: parseJSON(r.ability_json, []),
   })));
 });
 
@@ -40,9 +45,9 @@ router.get('/:id', (req, res) => {
     id: feat.id,
     name: feat.name,
     source: feat.source,
-    prerequisites: JSON.parse(feat.prerequisites_json || '[]'),
-    ability: JSON.parse(feat.ability_json || '[]'),
-    data: JSON.parse(feat.data_json),
+    prerequisites: parseJSON(feat.prerequisites_json, []),
+    ability: parseJSON(feat.ability_json, []),
+    data: parseJSON(feat.data_json),
   });
 });
 

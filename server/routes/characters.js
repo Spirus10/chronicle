@@ -1,3 +1,7 @@
+/**
+ * @fileoverview Character API routes.
+ * Handles CRUD operations for player characters, state, effects, inventory, and currency.
+ */
 'use strict';
 const express = require('express');
 const db = require('../db');
@@ -9,6 +13,11 @@ router.use(requireAuth);
 
 // ── Helpers ────────────────────────────────────────────────────
 
+/**
+ * Parses character database record and deserializes JSON fields.
+ * @param {Object} [row] - Character record from database
+ * @returns {Object|null} Parsed character object or null if row is falsy
+ */
 function parseChar(row) {
   if (!row) return null;
   return {
@@ -42,10 +51,22 @@ function parseChar(row) {
   };
 }
 
+/**
+ * Checks if a user owns a character.
+ * @param {number} userId - The user ID to check
+ * @param {number} characterId - The character ID to verify ownership of
+ * @returns {Object|undefined} Character record if owned, undefined if not found
+ */
 function getOwnedCharacterId(userId, characterId) {
   return db.prepare('SELECT id FROM characters WHERE id = ? AND owner_user_id = ?').get(characterId, userId);
 }
 
+/**
+ * Middleware helper to verify character ownership and return error if not owned.
+ * @param {Object} req - Express request (must have user and params.id)
+ * @param {Object} res - Express response (used to send 404 error)
+ * @returns {Object|null} Character ID object if owned, null if not found (error already sent)
+ */
 function requireOwnedCharacter(req, res) {
   const row = getOwnedCharacterId(req.user.id, req.params.id);
   if (!row) {
@@ -55,6 +76,11 @@ function requireOwnedCharacter(req, res) {
   return row;
 }
 
+/**
+ * Parses character state database record and deserializes JSON fields.
+ * @param {Object} [row] - Character state record from database
+ * @returns {Object|null} Parsed character state or null if row is falsy
+ */
 function parseState(row) {
   if (!row) return null;
   return {
@@ -77,6 +103,11 @@ function parseState(row) {
   };
 }
 
+/**
+ * Parses effect definition record and deserializes JSON effect data.
+ * @param {Object} [row] - Effect definition record from database
+ * @returns {Object|null} Parsed effect object or null if row is falsy
+ */
 function parseEffectRow(row) {
   if (!row) return null;
   const effect = JSON.parse(row.effect_json || '{}');
@@ -94,6 +125,12 @@ function parseEffectRow(row) {
   };
 }
 
+/**
+ * Fetches effect definitions by source type and IDs.
+ * @param {string} sourceType - Type of effect source (e.g., 'spell', 'class_feature', 'race')
+ * @param {number[]} sourceIds - Array of source IDs to fetch
+ * @returns {Object[]} Array of parsed effect objects, duplicates removed
+ */
 function fetchEffectDefinitions(sourceType, sourceIds) {
   const ids = [...new Set((sourceIds || []).filter(n => Number.isInteger(n) && n > 0))];
   if (!ids.length) return [];
@@ -106,6 +143,12 @@ function fetchEffectDefinitions(sourceType, sourceIds) {
   return rows.map(parseEffectRow).filter(Boolean);
 }
 
+/**
+ * Fetches effect definitions by source type and effect names.
+ * @param {string} sourceType - Type of effect source
+ * @param {string[]} names - Array of effect names to fetch
+ * @returns {Object[]} Array of parsed effect objects, duplicates removed
+ */
 function fetchEffectDefinitionsByName(sourceType, names) {
   const list = [...new Set((names || []).map(n => String(n || '').trim()).filter(Boolean))];
   if (!list.length) return [];
@@ -118,6 +161,11 @@ function fetchEffectDefinitionsByName(sourceType, names) {
   return rows.map(parseEffectRow).filter(Boolean);
 }
 
+/**
+ * Loads all applicable effect definitions for a character based on class, race, spells, etc.
+ * @param {Object} [char] - Parsed character object
+ * @returns {Object[]} Array of effect definitions applicable to the character
+ */
 function loadCharacterEffectDefinitions(char) {
   if (!char) return [];
   const effects = [];
@@ -162,6 +210,14 @@ function loadCharacterEffectDefinitions(char) {
   return effects;
 }
 
+/**
+ * Determines if an effect should be included in results based on filter criteria.
+ * Handles toggle-required effects and action-type filtering.
+ * @param {Object} [effect] - Effect definition object
+ * @param {Object} [filter] - Filter criteria (e.g., {action_type: 'spell'})
+ * @param {Object[]} [activeEffects] - List of active effects to check toggles
+ * @returns {boolean} True if effect should be included
+ */
 function shouldIncludeEffect(effect, filter, activeEffects) {
   if (!filter || !effect) return true;
   if (effect.tags && Array.isArray(effect.tags) && effect.tags.includes('requires_toggle')) {
@@ -181,6 +237,12 @@ function shouldIncludeEffect(effect, filter, activeEffects) {
   return true;
 }
 
+/**
+ * Enriches character object with denormalized foreign key data (class names, etc).
+ * Attaches human-readable names and related data from lookup tables.
+ * @param {Object} [char] - Parsed character object
+ * @returns {Object|null} Enriched character object or null if input is falsy
+ */
 function enrichCharacter(char) {
   if (!char) return null;
   // Attach class/subclass/race/background names for convenience
@@ -214,6 +276,11 @@ function enrichCharacter(char) {
   return char;
 }
 
+/**
+ * Finds the highest spell slot level available in a spell slots array.
+ * @param {number[]} [spellSlots] - Array of spell slot counts by level (index 0-8)
+ * @returns {number} Highest level with available slots (1-9), or 0 if none available
+ */
 function highestSlotLevel(spellSlots) {
   if (!Array.isArray(spellSlots)) return 0;
   for (let i = spellSlots.length - 1; i >= 0; i--) {
@@ -222,12 +289,23 @@ function highestSlotLevel(spellSlots) {
   return 0;
 }
 
+/**
+ * Gets maximum spell level a character can prepare/know based on caster progression and slots.
+ * @param {string} casterProgression - Caster progression type (reserved for future use)
+ * @param {number[]} spellSlots - Array of available spell slots by level
+ * @returns {number} Maximum selectable spell level (0-9)
+ */
 function getMaxSelectableSpellLevel(casterProgression, spellSlots) {
   const maxFromSlots = highestSlotLevel(spellSlots);
   if (!maxFromSlots) return 0;
   return maxFromSlots;
 }
 
+/**
+ * Extracts item name from equipment token (handles string, object, and pipe-delimited formats).
+ * @param {string|Object} [token] - Equipment token to parse
+ * @returns {string|null} Parsed item name or null if unparseable
+ */
 function parseItemName(token) {
   if (!token) return null;
   if (typeof token === 'string') {
@@ -240,6 +318,11 @@ function parseItemName(token) {
   return null;
 }
 
+/**
+ * Extracts starting equipment and copper pieces from background data.
+ * @param {Object} [backgroundRow] - Background record with data_json field
+ * @returns {{items: string[], cp: number}} Object with items array and cp count
+ */
 function backgroundStartingPicks(backgroundRow) {
   if (!backgroundRow) return { items: [], cp: 0 };
   const data = JSON.parse(backgroundRow.data_json || '{}');
@@ -264,6 +347,14 @@ function backgroundStartingPicks(backgroundRow) {
   return { items, cp };
 }
 
+/**
+ * Validates spell selection against class progression limits.
+ * Checks cantrip count, leveled spell count, and maximum spell level.
+ * @param {number} [classId] - Character's class ID
+ * @param {number} [level] - Character's current level
+ * @param {number[]} [spellsKnown] - Array of selected spell IDs
+ * @returns {string|null} Error message if invalid, null if valid
+ */
 function validateSpellSelection(classId, level, spellsKnown = []) {
   if (!classId || !Array.isArray(spellsKnown) || spellsKnown.length === 0) return null;
 
@@ -320,22 +411,33 @@ router.get('/', (req, res) => {
     SELECT c.id, c.name, c.level, c.alignment, c.portrait_url, c.campaign_id,
            c.class_id, c.subclass_id, c.race_id, c.background_id,
            c.experience_points, c.created_at, c.updated_at,
-            c.stat_overrides_json,
-            cl.name as class_name, sc.name as subclass_name,
-            r.name as race_name,
-            cs.hp_current, cs.hp_temp
+           c.stat_overrides_json,
+           cl.name as class_name, cl.hit_die, cl.spellcasting_ability,
+           cl.caster_progression, cl.save_proficiencies as save_proficiencies_json,
+           sc.name as subclass_name,
+           r.name as race_name, r.speed_json, r.ability_json, r.darkvision,
+           bg.name as background_name,
+           cs.hp_current, cs.hp_temp
     FROM characters c
     LEFT JOIN classes cl ON c.class_id = cl.id
     LEFT JOIN subclasses sc ON c.subclass_id = sc.id
     LEFT JOIN races r ON c.race_id = r.id
+    LEFT JOIN backgrounds bg ON c.background_id = bg.id
     LEFT JOIN character_state cs ON c.id = cs.character_id
     WHERE c.owner_user_id = ?
     ORDER BY c.updated_at DESC
   `).all(req.user.id);
   const parsed = rows.map(r => {
     const overrides = JSON.parse(r.stat_overrides_json || '{}');
-    const { stat_overrides_json, ...rest } = r;
-    return { ...rest, hp_max: overrides.hp_max || null };
+    const { stat_overrides_json, save_proficiencies_json, speed_json, ability_json, ...rest } = r;
+    return {
+      ...rest,
+      hp_max: overrides.hp_max || null,
+      class_save_proficiencies: JSON.parse(save_proficiencies_json || '[]'),
+      race_speed: JSON.parse(speed_json || '{}'),
+      race_ability: JSON.parse(ability_json || '[]'),
+      race_darkvision: r.darkvision,
+    };
   });
   res.json(parsed);
 });
@@ -403,47 +505,53 @@ router.post('/', (req, res) => {
       @feats_json, @backstory, @personality_traits, @ideals, @bonds, @flaws, @appearance, @portrait_url)
   `);
 
-  const result = insertChar.run({
-    name, owner_user_id: req.user.id, class_id: class_id ?? null, subclass_id: subclass_id ?? null,
-    race_id: race_id ?? null, background_id: background_id ?? null,
-    level, experience_points, alignment: alignment ?? null,
-    ability_scores_json: JSON.stringify(ability_scores),
-    stat_overrides_json: JSON.stringify(stat_overrides),
-    skill_proficiencies_json: JSON.stringify(skill_proficiencies),
-    spellcasting_type: spellType ?? null,
-    spellbook_json: JSON.stringify(spellbook),
-    spells_known_json: JSON.stringify(spells_known),
-    feats_json: JSON.stringify(feats),
-    backstory, personality_traits, ideals, bonds, flaws, appearance,
-    portrait_url: portrait_url ?? null,
+  const createCharacter = db.transaction(() => {
+    const result = insertChar.run({
+      name, owner_user_id: req.user.id, class_id: class_id ?? null, subclass_id: subclass_id ?? null,
+      race_id: race_id ?? null, background_id: background_id ?? null,
+      level, experience_points, alignment: alignment ?? null,
+      ability_scores_json: JSON.stringify(ability_scores),
+      stat_overrides_json: JSON.stringify(stat_overrides),
+      skill_proficiencies_json: JSON.stringify(skill_proficiencies),
+      spellcasting_type: spellType ?? null,
+      spellbook_json: JSON.stringify(spellbook),
+      spells_known_json: JSON.stringify(spells_known),
+      feats_json: JSON.stringify(feats),
+      backstory, personality_traits, ideals, bonds, flaws, appearance,
+      portrait_url: portrait_url ?? null,
+    });
+
+    const charId = result.lastInsertRowid;
+
+    // Create initial state
+    db.prepare(`
+      INSERT INTO character_state (character_id, hp_current)
+      VALUES (?, ?)
+    `).run(charId, startHp ?? 1);
+
+    // Create currency row
+    db.prepare(`INSERT INTO currency (character_id) VALUES (?)`).run(charId);
+
+    // Seed starting equipment and coins from background data (best effort)
+    if (background_id) {
+      const bgRow = db.prepare('SELECT data_json FROM backgrounds WHERE id = ?').get(background_id);
+      const start = backgroundStartingPicks(bgRow);
+      if (start.items.length) {
+        const insertInv = db.prepare(`
+          INSERT INTO inventory (character_id, name, quantity, item_type, notes, sort_order)
+          VALUES (?, ?, 1, 'misc', 'Starting equipment', ?)
+        `);
+        start.items.forEach((itemName, idx) => insertInv.run(charId, itemName, idx));
+      }
+      if (start.cp > 0) {
+        db.prepare('UPDATE currency SET cp = cp + ? WHERE character_id = ?').run(start.cp, charId);
+      }
+    }
+
+    return charId;
   });
 
-  const charId = result.lastInsertRowid;
-
-  // Create initial state
-  db.prepare(`
-    INSERT INTO character_state (character_id, hp_current)
-    VALUES (?, ?)
-  `).run(charId, startHp ?? 1);
-
-  // Create currency row
-  db.prepare(`INSERT INTO currency (character_id) VALUES (?)`).run(charId);
-
-  // Seed starting equipment and coins from background data (best effort)
-  if (background_id) {
-    const bgRow = db.prepare('SELECT data_json FROM backgrounds WHERE id = ?').get(background_id);
-    const start = backgroundStartingPicks(bgRow);
-    if (start.items.length) {
-      const insertInv = db.prepare(`
-        INSERT INTO inventory (character_id, name, quantity, item_type, notes, sort_order)
-        VALUES (?, ?, 1, 'misc', 'Starting equipment', ?)
-      `);
-      start.items.forEach((name, idx) => insertInv.run(charId, name, idx));
-    }
-    if (start.cp > 0) {
-      db.prepare('UPDATE currency SET cp = cp + ? WHERE character_id = ?').run(start.cp, charId);
-    }
-  }
+  const charId = createCharacter();
 
   const char = enrichCharacter(parseChar(db.prepare('SELECT * FROM characters WHERE id = ?').get(charId)));
   res.status(201).json(char);

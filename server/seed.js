@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Seed script: fetch all 5e.tools data once and store in SQLite.
+ * @fileoverview Seed script for fetching 5e.tools data and storing in SQLite.
  * Run: node server/seed.js
  * Idempotent — safe to re-run; uses INSERT OR REPLACE.
  */
@@ -865,6 +865,12 @@ async function seedHomebrewSubclasses() {
   }
 }
 
+/**
+ * Main seed function that fetches all 5e.tools data and populates the database.
+ * Seeds classes, races, spells, feats, backgrounds, optional features, weapons, and effects.
+ * @async
+ * @returns {Promise<void>}
+ */
 async function main() {
   console.log('Starting 5e.tools data seed...');
   const start = Date.now();
@@ -895,7 +901,11 @@ async function main() {
   console.log(`  Optional:    ${db.prepare('SELECT COUNT(*) as n FROM optional_features').get().n}`);
 }
 
-main().catch(err => {
-  console.error('Seed failed:', err);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch(err => {
+    console.error('Seed failed:', err);
+    process.exit(1);
+  });
+}
+
+module.exports = { main };

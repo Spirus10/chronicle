@@ -1,6 +1,12 @@
+/**
+ * @fileoverview Class API routes.
+ * Provides read-only access to class, subclass, progression, and feature data.
+ */
 'use strict';
 const express = require('express');
 const db = require('../db');
+const { parseJSON } = require('../utils/json-parser');
+const { MAX_LEVEL, MIN_LEVEL } = require('../constants/game-rules');
 const router = express.Router();
 
 // GET /api/classes — list all classes
@@ -11,7 +17,7 @@ router.get('/', (req, res) => {
   `).all();
   res.json(rows.map(r => ({
     ...r,
-    save_proficiencies: JSON.parse(r.save_proficiencies || '[]'),
+    save_proficiencies: parseJSON(r.save_proficiencies, []),
   })));
 });
 
@@ -29,9 +35,9 @@ router.get('/:id', (req, res) => {
 
   res.json({
     ...cls,
-    save_proficiencies: JSON.parse(cls.save_proficiencies || '[]'),
+    save_proficiencies: parseJSON(cls.save_proficiencies, []),
     data_json: undefined,
-    data: JSON.parse(cls.data_json),
+    data: parseJSON(cls.data_json),
     subclasses,
   });
 });
@@ -46,16 +52,18 @@ router.get('/:id/progression', (req, res) => {
   res.json(rows.map(r => ({
     level: r.level,
     proficiency_bonus: r.proficiency_bonus,
-    spell_slots: r.spell_slots_json ? JSON.parse(r.spell_slots_json) : null,
+    spell_slots: r.spell_slots_json ? parseJSON(r.spell_slots_json) : null,
     cantrips_known: r.cantrips_known,
     spells_known: r.spells_known,
-    class_specific: r.class_specific_json ? JSON.parse(r.class_specific_json) : null,
+    class_specific: r.class_specific_json ? parseJSON(r.class_specific_json) : null,
   })));
 });
 
 // GET /api/classes/:id/features?level=5 — base class features up to level N
 router.get('/:id/features', (req, res) => {
-  const maxLevel = parseInt(req.query.level) || 20;
+  const parsedLevel = parseInt(req.query.level);
+  const maxLevel = (!isNaN(parsedLevel) && parsedLevel >= MIN_LEVEL && parsedLevel <= MAX_LEVEL)
+    ? parsedLevel : MAX_LEVEL;
   const rows = db.prepare(`
     SELECT id, level, name, entries_json, header
     FROM class_features
@@ -68,7 +76,7 @@ router.get('/:id/features', (req, res) => {
     level: r.level,
     name: r.name,
     header: r.header,
-    entries: JSON.parse(r.entries_json),
+    entries: parseJSON(r.entries_json),
   })));
 });
 
@@ -83,13 +91,15 @@ router.get('/:classId/subclasses/:subId', (req, res) => {
   res.json({
     ...sub,
     data_json: undefined,
-    data: JSON.parse(sub.data_json),
+    data: parseJSON(sub.data_json),
   });
 });
 
 // GET /api/classes/:classId/subclasses/:subId/features?level=5
 router.get('/:classId/subclasses/:subId/features', (req, res) => {
-  const maxLevel = parseInt(req.query.level) || 20;
+  const parsedSubLevel = parseInt(req.query.level);
+  const maxLevel = (!isNaN(parsedSubLevel) && parsedSubLevel >= MIN_LEVEL && parsedSubLevel <= MAX_LEVEL)
+    ? parsedSubLevel : MAX_LEVEL;
   const rows = db.prepare(`
     SELECT id, level, name, entries_json, header
     FROM class_features
@@ -102,7 +112,7 @@ router.get('/:classId/subclasses/:subId/features', (req, res) => {
     level: r.level,
     name: r.name,
     header: r.header,
-    entries: JSON.parse(r.entries_json),
+    entries: parseJSON(r.entries_json),
   })));
 });
 
