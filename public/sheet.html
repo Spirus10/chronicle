@@ -597,7 +597,7 @@ const CONDITIONS = [
   {k:'restrained',n:'Restrained',d:'Speed 0; attacks vs you advantage; DEX saves disadvantage.'},
   {k:'stunned',n:'Stunned',d:"Incapacitated, can't move; attacks vs you advantage."},
   {k:'unconscious',n:'Unconscious',d:"Incapacitated, unaware; hits within 5ft are crits."},
-  {k:'exhaustion',n:'Exhaustion',d:'Stacking debuff — 1:Disadv on checks, 3:Disadv on attacks/saves, 5:Speed halved/halved again, 6:Death.'},
+  {k:'exhaustion',n:'Exhaustion',d:'Stacking debuff — 1:Disadv on checks, 2:Speed halved, 3:Disadv on attacks/saves, 4:HP max halved, 5:Speed=0, 6:Death. Track level manually.'},
 ];
 
 const DAMAGE_TYPES = [
@@ -2598,10 +2598,12 @@ function renderActions() {
       buttons.push(spellBtn(`⚡ Action Surge (${asMax - asUsed}/${asMax})`, '#e8c170', false, asUsed >= asMax, 'useActionSurge()', asTooltip, 'action', { range: 'Self', notes: asNotes, actionKind: 'feature', actionName: 'Action Surge' }));
     }
     if (char.level >= 9) {
+      const indMax = char.level >= 17 ? 3 : char.level >= 13 ? 2 : 1;
+      const indUsed = res.indomitable_used || 0;
       const indEffect = getEffectByName('Indomitable');
       const indTooltip = effectTooltipText(indEffect, 'Indomitable') || getActionTooltip('indomitable', 'Indomitable');
       const indNotes = buildNotesFromEffect(indEffect);
-      buttons.push(spellBtn('🔁 Indomitable', '#6080cc', false, !!res.indomitable_used, 'useIndomitable()', indTooltip, 'other', { range: 'Self', notes: indNotes, actionKind: 'feature', actionName: 'Indomitable' }));
+      buttons.push(spellBtn(`🔁 Indomitable (${indMax - indUsed}/${indMax})`, '#6080cc', false, indUsed >= indMax, 'useIndomitable()', indTooltip, 'other', { range: 'Self', notes: indNotes, actionKind: 'feature', actionName: 'Indomitable' }));
     }
   }
 
@@ -2656,12 +2658,14 @@ function renderActions() {
 
   // ── Sorcerer ──────────────────────────────────────────────────
   if (cls === 'sorcerer') {
+    if (char.level >= 2) {
     const spMax = char.level;
     const spUsed = res.sorcery_points_used || 0;
     const spEffect = getEffectByName('Font of Magic');
     const spTooltip = effectTooltipText(spEffect, 'Sorcery Points') || getActionTooltip('sorcery_points', 'Sorcery Points');
     const spNotes = buildNotesFromEffect(spEffect);
     buttons.push(spellBtn(`✨ Sorcery Points (${spMax - spUsed}/${spMax})`, '#cc60cc', false, spUsed >= spMax, 'useSorceryPoint(1)', spTooltip, 'other', { range: 'Self', notes: spNotes, actionKind: 'feature', actionName: 'Font of Magic' }));
+    }
     const mmEffect = getEffectByName('Metamagic');
     const mmTooltip = effectTooltipText(mmEffect, 'Metamagic') || getActionTooltip('metamagic', 'Metamagic');
     const mmNotes = buildNotesFromEffect(mmEffect);
@@ -2988,6 +2992,7 @@ function promptSetMaxHP() {
   char.stat_overrides.hp_max = n;
   state.hp_current = Math.min(state.hp_current, n);
   addLog(`Max HP set to ${n}.`);
+  API.put(`/characters/${charId}`, { stat_overrides: char.stat_overrides }).catch(() => {});
   updateHPDisplay();
 }
 
@@ -3281,6 +3286,10 @@ function nextRound() {
     setEffectActive('Sneak Attack', false, '#cc9040', 0, false, 'sneak_attack');
     addLog('Sneak Attack toggled off (new round).');
   }
+  if (res.reckless) {
+    res.reckless = false;
+    addLog('Reckless Attack ended (new round).');
+  }
   state.class_resources = res;
   addLog(`── Round ${state.combat_round} ──`);
   renderCombatSection();
@@ -3304,6 +3313,9 @@ function doShortRest() {
   if (cls === 'barbarian') { delete res.raging; }
   if (cls === 'fighter') { delete res.action_surge_used; delete res.second_wind_used; }
   if (cls === 'monk') { res.ki_used = 0; }
+  if (cls === 'druid') { res.wild_shape_used = 0; res.wild_shaped = false; }
+  if (cls === 'cleric' || cls === 'paladin') { res.channel_divinity_used = 0; }
+  if (cls === 'bard' && char.level >= 5) { res.bardic_inspiration_used = 0; }
   state.class_resources = res;
   state.combat_active = false;
   state.combat_round = 0;
@@ -3325,7 +3337,7 @@ function doLongRest() {
   // Recover half hit dice (rounded up)
   const hdTotal = char.level;
   const hdUsed = Array.isArray(state.hit_dice_used) ? state.hit_dice_used.filter(Boolean).length : 0;
-  const hdRecover = Math.max(1, Math.floor(hdTotal / 2));
+  const hdRecover = Math.max(1, Math.ceil(hdTotal / 2));
   if (Array.isArray(state.hit_dice_used)) {
     let left = hdRecover;
     for (let i = 0; i < state.hit_dice_used.length && left > 0; i++) {
@@ -3381,8 +3393,7 @@ function useBite() {
     msg += ` + healed ${chaMod} HP (below half)`;
   }
   addLog(msg);
-  debouncedSaveState();
-  renderActions();
+  updateHPDisplay();
 }
 
 function activateForm() {
@@ -3473,10 +3484,11 @@ function useActionSurge() {
 
 function useIndomitable() {
   const res = state.class_resources || {};
-  if (res.indomitable_used) { addLog('Indomitable already used!'); return; }
-  res.indomitable_used = true;
+  const max = char.level >= 17 ? 3 : char.level >= 13 ? 2 : 1;
+  if ((res.indomitable_used || 0) >= max) { addLog(`Indomitable already used (${max}/${max})!`); return; }
+  res.indomitable_used = (res.indomitable_used || 0) + 1;
   state.class_resources = res;
-  addLog('Indomitable: reroll a saving throw.');
+  addLog(`Indomitable: reroll a saving throw (${res.indomitable_used}/${max} used).`);
   debouncedSaveState();
   renderActions();
 }
