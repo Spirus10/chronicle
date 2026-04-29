@@ -1712,26 +1712,6 @@ function rollDamage(label, expr, isHealing = false) {
   return total;
 }
 
-// Override any malformed parser earlier in file
-function rollDiceExpression(expr) {
-  const raw = String(expr || '').trim();
-  const match = raw.match(/^(\d+)d(\d+)([+-]\d+)?$/i);
-  if (!match) return null;
-  const count = parseInt(match[1], 10);
-  const sides = parseInt(match[2], 10);
-  const mod = match[3] ? parseInt(match[3], 10) : 0;
-  if (!count || !sides) return null;
-  let total = 0;
-  const rolls = [];
-  for (let i = 0; i < count; i++) {
-    const r = Math.floor(Math.random() * sides) + 1;
-    rolls.push(r);
-    total += r;
-  }
-  total += mod;
-  return { total, rolls, mod };
-}
-
 function firstEntryText(entries) {
   if (!entries) return '';
   if (typeof entries === 'string') return entries;
@@ -2610,7 +2590,7 @@ function renderActions() {
       forceOnclick: true,
     }));
     if (char.level >= 2) {
-      const asMax = char.level >= 17 ? 3 : char.level >= 2 ? 1 : 0;
+      const asMax = char.level >= 17 ? 2 : char.level >= 2 ? 1 : 0;
       const asUsed = res.action_surge_used || 0;
       const asEffect = getEffectByName('Action Surge');
       const asTooltip = effectTooltipText(asEffect, 'Action Surge') || getActionTooltip('action_surge', 'Action Surge');
@@ -3034,6 +3014,7 @@ function stabilize() {
   state.death_saves = { successes: 0, failures: 0 };
   state.hp_current = 1;
   addLog('Character stabilized at 1 HP.');
+  debouncedSaveState();
   renderHpPanel();
   renderExtras();
 }
@@ -3290,7 +3271,7 @@ function nextRound() {
       if (e.duration_rounds <= 0) expired.push(e.name);
     }
     return e;
-  }).filter(e => e.duration_rounds !== 0);
+  }).filter(e => !expired.includes(e.name));
   expired.forEach(n => addLog(`${n} expired.`));
   // Reset per-round resources
   if ((char.class_name||'').toLowerCase() === 'warlock') {
@@ -3304,6 +3285,7 @@ function nextRound() {
   addLog(`── Round ${state.combat_round} ──`);
   renderCombatSection();
   renderEffects();
+  renderActions();
   debouncedSaveState();
 }
 
@@ -3480,7 +3462,7 @@ function useSecondWind() {
 
 function useActionSurge() {
   const res = state.class_resources || {};
-  const max = char.level >= 17 ? 3 : 1;
+  const max = char.level >= 17 ? 2 : 1;
   if ((res.action_surge_used||0) >= max) { addLog('Action Surge already used!'); return; }
   res.action_surge_used = (res.action_surge_used||0) + 1;
   state.class_resources = res;
@@ -3513,7 +3495,7 @@ function useKi(cost) {
   if ((res.ki_used||0) + cost > max) { addLog(`Not enough Ki points! (${max - (res.ki_used||0)} remaining)`); return; }
   res.ki_used = (res.ki_used||0) + cost;
   state.class_resources = res;
-  addLog(`Used ${cost} Ki point${cost>1?'s':`(${max - res.ki_used} remaining)`}`);
+  addLog(`Used ${cost} Ki point${cost > 1 ? 's' : ''} (${max - res.ki_used} remaining).`);
   debouncedSaveState();
   renderActions();
 }
