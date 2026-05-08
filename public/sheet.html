@@ -666,7 +666,9 @@ async function init() {
 
     // Load selected spells by ID so chosen spells always render
     if (char.spellcasting_type) {
-      const knownIds = [...new Set([...(char.spells_known||[]), ...(char.spellbook||[])])];
+      const tomeIds = char.stat_overrides?.tome_cantrips || [];
+      const bookIds = char.stat_overrides?.book_rituals || [];
+      const knownIds = [...new Set([...(char.spells_known||[]), ...(char.spellbook||[]), ...tomeIds, ...bookIds])];
       if (knownIds.length) {
         const loaded = await Promise.all(
           knownIds.map(id => API.get(`/spells/${id}`).catch(() => null))
@@ -3673,7 +3675,9 @@ function renderSpells() {
     return;
   }
 
-  const knownIds = new Set([...(char.spells_known||[]), ...(char.spellbook||[])]);
+  const tomeIds = new Set(char.stat_overrides?.tome_cantrips || []);
+  const bookIds = new Set(char.stat_overrides?.book_rituals || []);
+  const knownIds = new Set([...(char.spells_known||[]), ...(char.spellbook||[]), ...tomeIds, ...bookIds]);
   const spells = allSpells.filter(s => knownIds.has(s.id));
   const stats = getStats();
 
@@ -3763,6 +3767,8 @@ function renderSpells() {
       if (sp.duration_text) noteParts.push(shortDuration(sp.duration_text));
       if (sp.concentration) noteParts.push('Concentration');
       if (sp.ritual) noteParts.push('Ritual');
+      if (tomeIds.has(sp.id)) noteParts.push('Tome');
+      if (bookIds.has(sp.id)) noteParts.push('Book of Ancient Secrets — ritual only');
       const notes = buildNotesFromEffect(spellEffect, noteParts);
       rows += `
         <div class="action-row" data-action-name="${escapeAttr(sp.name)}" data-action-kind="spell" data-action-healing="${isHeal ? 'true' : 'false'}">
@@ -3925,6 +3931,12 @@ function renderFeatures() {
     html += `<div id="optionalFeatures"><div style="font-size:12px;color:var(--dim)">Loading class options...</div></div>`;
   }
 
+  const showBook = (char.class_name || '').toLowerCase() === 'warlock' && (hasPactOfTheTome() || hasBookOfAncientSecrets());
+  if (showBook) {
+    html += `<div class="feature-section-label">Book of Shadows</div>`;
+    html += `<div id="bookOfShadows"><div style="font-size:12px;color:var(--dim)">Loading book...</div></div>`;
+  }
+
   if (!html) html = `<div class="loading-tab" style="color:var(--dim)">No features loaded.</div>`;
   container.innerHTML = html;
 
@@ -3998,6 +4010,193 @@ function renderFeatures() {
       el.innerHTML = choiceGroups.map(g => renderFeatureChoiceGroup(g)).join('');
     }
   }
+
+  if (showBook) renderBookOfShadows().catch(() => {});
+}
+
+let _allCantripsCache = null;
+let _allRitualsLevel1Cache = null;
+
+async function fetchAllCantrips() {
+  if (_allCantripsCache) return _allCantripsCache;
+  _allCantripsCache = await API.get('/spells?level=0').catch(() => []);
+  return _allCantripsCache;
+}
+
+async function fetchAllRitualsLevel1() {
+  if (_allRitualsLevel1Cache) return _allRitualsLevel1Cache;
+  _allRitualsLevel1Cache = await API.get('/spells?level=1&ritual=true').catch(() => []);
+  return _allRitualsLevel1Cache;
+}
+
+async function renderBookOfShadows() {
+  const el = document.getElementById('bookOfShadows');
+  if (!el) return;
+  const parts = [];
+  if (hasPactOfTheTome()) parts.push(await renderTomeCantripsCard());
+  if (hasBookOfAncientSecrets()) parts.push(await renderBoASCard());
+  el.innerHTML = parts.join('') || '<div style="font-size:12px;color:var(--dim)">No book features active.</div>';
+}
+
+function classListLabel(sp) {
+  const list = (sp.class_list || []).map(c => c.charAt(0).toUpperCase() + c.slice(1));
+  return list.length ? list.slice(0, 4).join(', ') + (list.length > 4 ? '…' : '') : '';
+}
+
+async function renderTomeCantripsCard() {
+  const cantrips = await fetchAllCantrips();
+  const selected = char.stat_overrides?.tome_cantrips || [];
+  const selectedSet = new Set(selected);
+  const max = 3;
+  const selectedSpells = cantrips.filter(s => selectedSet.has(s.id));
+  const available = cantrips.filter(s => !selectedSet.has(s.id))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const bodyId = 'bos_tome';
+  const open = isCardOpen(bodyId) || selected.length < max;
+
+  let body = `<div style="font-size:12px;color:var(--dim);margin-bottom:8px">Choose ${max} cantrips from any class spell list. They are always prepared and don't count against cantrips known.</div>`;
+  if (selectedSpells.length) {
+    body += selectedSpells.map(sp => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:var(--paper);border:1px solid var(--border);border-radius:4px;margin-bottom:4px;font-size:13px">
+        <span><strong>${escapeHtml(sp.name)}</strong> <span style="color:var(--dim);font-size:11px">${escapeHtml(classListLabel(sp))}</span></span>
+        <button class="btn btn-sm" onclick="removeTomeCantrip(${sp.id})">Remove</button>
+      </div>`).join('');
+  }
+  if (selected.length < max) {
+    body += `<div style="display:flex;gap:6px;margin-top:6px">
+      <select id="tome_cantrip_select" style="flex:1;padding:6px 8px;background:var(--paper);border:1px solid var(--border);border-radius:4px;color:var(--text)">
+        <option value="">— Choose a cantrip —</option>
+        ${available.map(sp => `<option value="${sp.id}">${escapeHtml(sp.name)} — ${escapeHtml(classListLabel(sp))}</option>`).join('')}
+      </select>
+      <button class="btn btn-gold btn-sm" onclick="addTomeCantripFromSelect()">Add</button>
+    </div>`;
+  } else {
+    body += `<div style="font-size:11px;color:var(--dim);margin-top:6px">All ${max} cantrips chosen.</div>`;
+  }
+
+  return `
+    <div class="feature-card">
+      <div class="feature-header" onclick="toggleFeatureCard('${bodyId}')">
+        <div class="feature-name">Pact of the Tome — Cantrips (${selected.length}/${max})</div>
+      </div>
+      <div class="feature-body ${open ? 'open' : ''}" id="${bodyId}">${body}</div>
+    </div>
+  `;
+}
+
+async function renderBoASCard() {
+  const rituals = await fetchAllRitualsLevel1();
+  const selected = char.stat_overrides?.book_rituals || [];
+  const selectedSet = new Set(selected);
+  const max = 2;
+  const selectedSpells = rituals.filter(s => selectedSet.has(s.id));
+  const available = rituals.filter(s => !selectedSet.has(s.id))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const bodyId = 'bos_boas';
+  const open = isCardOpen(bodyId) || selected.length < max;
+  const maxCopyLevel = Math.max(1, Math.floor(char.level / 2));
+
+  let body = `<div style="font-size:12px;color:var(--dim);margin-bottom:8px">Choose ${max} 1st-level ritual spells from any class. They can only be cast as rituals (no slot needed). Found ritual spells of level ≤ ${maxCopyLevel} can be copied into your book later.</div>`;
+  if (selectedSpells.length) {
+    body += selectedSpells.map(sp => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:var(--paper);border:1px solid var(--border);border-radius:4px;margin-bottom:4px;font-size:13px">
+        <span><strong>${escapeHtml(sp.name)}</strong> <span style="color:var(--dim);font-size:11px">${escapeHtml(classListLabel(sp))}</span></span>
+        <button class="btn btn-sm" onclick="removeBookRitual(${sp.id})">Remove</button>
+      </div>`).join('');
+  }
+  if (selected.length < max) {
+    body += `<div style="display:flex;gap:6px;margin-top:6px">
+      <select id="book_ritual_select" style="flex:1;padding:6px 8px;background:var(--paper);border:1px solid var(--border);border-radius:4px;color:var(--text)">
+        <option value="">— Choose a ritual —</option>
+        ${available.map(sp => `<option value="${sp.id}">${escapeHtml(sp.name)} — ${escapeHtml(classListLabel(sp))}</option>`).join('')}
+      </select>
+      <button class="btn btn-gold btn-sm" onclick="addBookRitualFromSelect()">Add</button>
+    </div>`;
+  } else {
+    body += `<div style="font-size:11px;color:var(--dim);margin-top:6px">All ${max} starter rituals chosen. Add more found rituals via the DM.</div>`;
+  }
+
+  return `
+    <div class="feature-card">
+      <div class="feature-header" onclick="toggleFeatureCard('${bodyId}')">
+        <div class="feature-name">Book of Ancient Secrets — Rituals (${selected.length}/${max})</div>
+      </div>
+      <div class="feature-body ${open ? 'open' : ''}" id="${bodyId}">${body}</div>
+    </div>
+  `;
+}
+
+async function persistStatOverrides() {
+  try {
+    await API.put(`/characters/${charId}`, { stat_overrides: char.stat_overrides });
+  } catch (e) {
+    toast('Failed to save Book of Shadows.', 'error');
+  }
+}
+
+async function ensureSpellLoaded(id) {
+  if (allSpells.find(s => s.id === id)) return;
+  const sp = await API.get(`/spells/${id}`).catch(() => null);
+  if (sp) {
+    allSpells.push(sp);
+    indexSpellDetail(sp);
+  }
+}
+
+async function addTomeCantripFromSelect() {
+  const sel = document.getElementById('tome_cantrip_select');
+  const id = parseInt(sel?.value, 10);
+  if (!id) return;
+  await addTomeCantrip(id);
+}
+
+async function addTomeCantrip(id) {
+  char.stat_overrides = char.stat_overrides || {};
+  const list = [...(char.stat_overrides.tome_cantrips || [])];
+  if (list.includes(id)) return;
+  if (list.length >= 3) { toast('Maximum 3 tome cantrips.', 'warn'); return; }
+  list.push(id);
+  char.stat_overrides.tome_cantrips = list;
+  await persistStatOverrides();
+  await ensureSpellLoaded(id);
+  await renderBookOfShadows();
+  renderSpells();
+}
+
+async function removeTomeCantrip(id) {
+  char.stat_overrides = char.stat_overrides || {};
+  char.stat_overrides.tome_cantrips = (char.stat_overrides.tome_cantrips || []).filter(x => x !== id);
+  await persistStatOverrides();
+  await renderBookOfShadows();
+  renderSpells();
+}
+
+async function addBookRitualFromSelect() {
+  const sel = document.getElementById('book_ritual_select');
+  const id = parseInt(sel?.value, 10);
+  if (!id) return;
+  await addBookRitual(id);
+}
+
+async function addBookRitual(id) {
+  char.stat_overrides = char.stat_overrides || {};
+  const list = [...(char.stat_overrides.book_rituals || [])];
+  if (list.includes(id)) return;
+  if (list.length >= 2) { toast('Maximum 2 starter ritual spells.', 'warn'); return; }
+  list.push(id);
+  char.stat_overrides.book_rituals = list;
+  await persistStatOverrides();
+  await ensureSpellLoaded(id);
+  await renderBookOfShadows();
+  renderSpells();
+}
+
+async function removeBookRitual(id) {
+  char.stat_overrides = char.stat_overrides || {};
+  char.stat_overrides.book_rituals = (char.stat_overrides.book_rituals || []).filter(x => x !== id);
+  await persistStatOverrides();
+  await renderBookOfShadows();
+  renderSpells();
 }
 
 function normalizeRefText(ref) {
@@ -4107,6 +4306,7 @@ async function setFeatureChoice(groupId, idx, value) {
 function optionalTypeLabel(type) {
   const map = {
     EI: 'Eldritch Invocations',
+    PB: 'Pact Boon',
     'FS:F': 'Fighting Style (Fighter)',
     'FS:R': 'Fighting Style (Ranger)',
   };
@@ -4120,7 +4320,23 @@ function optionalKnownCount(type) {
   if (type === 'EI' && cls === 'warlock') {
     return lvlProg.class_specific?.extra ?? 0;
   }
+  if (type === 'PB' && cls === 'warlock' && char.level >= 3) {
+    return 1;
+  }
   return null;
+}
+
+function getSelectedOptionalFeatureNames(type) {
+  const ids = optionalFeatureSelections[type] || [];
+  return ids.map(id => optionalFeaturesById[id]?.name).filter(Boolean);
+}
+
+function hasPactOfTheTome() {
+  return getSelectedOptionalFeatureNames('PB').includes('Pact of the Tome');
+}
+
+function hasBookOfAncientSecrets() {
+  return getSelectedOptionalFeatureNames('EI').includes('Book of Ancient Secrets');
 }
 
 function renderOptionalTypeSection(type, list) {
@@ -4228,6 +4444,8 @@ function extractOptionalFeatureTypes(features) {
   };
 
   for (const f of (features || [])) walk(f.entries);
+  const cls = (char.class_name || '').toLowerCase();
+  if (cls === 'warlock' && char.level >= 3) types.add('PB');
   return [...types];
 }
 
