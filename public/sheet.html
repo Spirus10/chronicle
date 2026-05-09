@@ -1548,6 +1548,20 @@ function extractDamageDice(text) {
   return match ? match[0].replace(/\s+/g, '') : '';
 }
 
+function cantripDiceMultiplier(level) {
+  if (level >= 17) return 4;
+  if (level >= 11) return 3;
+  if (level >= 5) return 2;
+  return 1;
+}
+
+function scaleCantripDice(baseExpr, level) {
+  const mult = cantripDiceMultiplier(level);
+  if (mult === 1 || !baseExpr) return baseExpr;
+  // Handle NdX — multiply N. Handles plain "dX" as 1dX.
+  return baseExpr.replace(/^(\d*)d(\d+)/i, (_, n, d) => `${parseInt(n || '1', 10) * mult}d${d}`);
+}
+
 function extractDamageExpression(text) {
   const raw = String(text || '');
   const matches = raw.match(/\b\d+d\d+(?:\s*[+\-]\s*\d+)?\b/gi) || [];
@@ -3748,7 +3762,11 @@ function renderSpells() {
             : (sp.attack_type || sp.attack_roll ? `+${stats.spellAtk}` : '—');
       const dmgFromEffect = buildDamageExpressionFromParts(isHeal ? effectHealingParts(spellEffect, stats) : effectDamageParts(spellEffect, stats));
       const baseText = toPlainEntryText(detail?.data?.entries || detail?.entries || '');
-      const dmgRaw = isHeal ? (extractDamageDice(baseText) || '') : (extractDamageExpression(baseText) || '');
+      const dmgRaw = isHeal
+        ? (extractDamageDice(baseText) || '')
+        : sp.level === 0
+          ? scaleCantripDice(extractDamageDice(baseText) || '', char.level)
+          : (extractDamageExpression(baseText) || '');
       const dmg = String(sp.name || '').toLowerCase() === 'hex' ? '' : (dmgFromEffect || dmgRaw);
       const displayExpr = dmg ? buildDamageExpression(sp.name, dmg, { isHealing: isHeal }) : '';
       const noteParts = [];
