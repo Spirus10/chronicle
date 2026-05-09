@@ -3925,7 +3925,32 @@ function renderFeatures() {
     html += `<div id="featureChoices"><div style="font-size:12px;color:var(--dim)">Loading choices...</div></div>`;
   }
 
+  // Features whose sole content is "pick from optional feature type X" are
+  // rendered as selectors in the Class Options section below — suppress the
+  // plain feature card so they don't appear twice.
   const optTypes = extractOptionalFeatureTypes([...(classFeatures || []), ...(subFeatures || [])]);
+  const optTypesSet = new Set(optTypes);
+
+  function isOptTypePlaceholder(feature) {
+    const types = extractOptionalFeatureTypes([feature]);
+    return types.length > 0 && types.every(t => optTypesSet.has(t));
+  }
+
+  if (classFeatures.length) {
+    const filtered = classFeatures.filter(f => !isOptTypePlaceholder(f));
+    if (filtered.length !== classFeatures.length) {
+      // Re-render class features section with the duplicates removed
+      const label = html.lastIndexOf(`<div class="feature-section-label">Class Features`);
+      if (label !== -1) {
+        html = html.slice(0, label);
+        if (filtered.length) {
+          html += `<div class="feature-section-label">Class Features — ${char.class_name}</div>`;
+          html += filtered.map(f => renderFeatureCard(f, 'cf')).join('');
+        }
+      }
+    }
+  }
+
   if (optTypes.length) {
     html += `<div class="feature-section-label">Class Options</div>`;
     html += `<div id="optionalFeatures"><div style="font-size:12px;color:var(--dim)">Loading class options...</div></div>`;
