@@ -76,24 +76,24 @@ const THIRD_CASTER_SLOTS = [
   [4,2,0,0,0,0,0,0,0],
   [4,2,0,0,0,0,0,0,0],
   [4,2,0,0,0,0,0,0,0],
+  [4,3,0,0,0,0,0,0,0],
+  [4,3,0,0,0,0,0,0,0],
+  [4,3,0,0,0,0,0,0,0],
   [4,3,2,0,0,0,0,0,0],
   [4,3,2,0,0,0,0,0,0],
   [4,3,2,0,0,0,0,0,0],
+  [4,3,3,0,0,0,0,0,0],
+  [4,3,3,0,0,0,0,0,0],
+  [4,3,3,0,0,0,0,0,0],
   [4,3,3,1,0,0,0,0,0],
   [4,3,3,1,0,0,0,0,0],
-  [4,3,3,1,0,0,0,0,0],
-  [4,3,3,1,0,0,0,0,0],
-  [4,3,3,1,0,0,0,0,0],
-  [4,3,3,1,0,0,0,0,0],
-  [4,3,3,2,0,0,0,0,0],
-  [4,3,3,2,0,0,0,0,0],
 ];
 
 // Pact magic: [level] = {slots, slot_level}
 const PACT_MAGIC = [
   null,
   {slots:1,slot_level:1},
-  {slots:2,slot_level:2},
+  {slots:2,slot_level:1},
   {slots:2,slot_level:2},
   {slots:2,slot_level:2},
   {slots:2,slot_level:3},
@@ -630,6 +630,29 @@ async function seedRaces() {
       });
     }
 
+    // 5etools subrace `ability` arrays hold only the subrace's additional
+    // increase; the base race's increases still apply and must be combined
+    // (Hill Dwarf = +2 CON from Dwarf plus +1 WIS from Hill).
+    function mergeSubraceAbility(parentAbility, subAbility) {
+      const parent = Array.isArray(parentAbility) ? parentAbility : [];
+      const sub = Array.isArray(subAbility) ? subAbility : [];
+      if (!parent.length) return sub;
+      if (!sub.length) return parent;
+      const numeric = {};
+      const extras = [];
+      for (const entry of [...parent, ...sub]) {
+        if (!entry || typeof entry !== 'object') continue;
+        for (const [key, val] of Object.entries(entry)) {
+          if (typeof val === 'number') numeric[key] = (numeric[key] || 0) + val;
+          else extras.push({ [key]: val });
+        }
+      }
+      const merged = [];
+      if (Object.keys(numeric).length) merged.push(numeric);
+      merged.push(...extras);
+      return merged;
+    }
+
     // Resolve subraces (including _copy), and inherit base fields for summary columns
     const subracesRaw = [...subraceList, ...raceList.filter(r => r.raceName)];
     const subraceMap = new Map(subracesRaw.map(r => [buildSubraceKey(r), r]));
@@ -640,7 +663,7 @@ async function seedRaces() {
       const parentRow = db.prepare('SELECT id FROM races WHERE name = ? AND parent_race_id IS NULL').get(race.raceName);
       const parentRace = baseRacesByName.get(race.raceName);
       const speed = normalizeSpeed(race.speed ?? parentRace?.speed);
-      const ability = race.ability ?? parentRace?.ability ?? [];
+      const ability = mergeSubraceAbility(parentRace?.ability, race.ability);
       const darkvision = race.darkvision ?? parentRace?.darkvision ?? 0;
       const traitTags = race.traitTags ?? parentRace?.traitTags ?? [];
 

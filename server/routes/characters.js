@@ -260,6 +260,15 @@ function enrichCharacter(char) {
     const sub = db.prepare('SELECT name, short_name, source FROM subclasses WHERE id = ?').get(char.subclass_id);
     if (sub) char.subclass_name = sub.name;
   }
+  // Eldritch Knight / Arcane Trickster are third casters even though their
+  // base class (Fighter / Rogue) has no spellcasting progression of its own.
+  if (!char.caster_progression && char.subclass_name) {
+    const subLower = char.subclass_name.toLowerCase();
+    if (subLower.includes('eldritch knight') || subLower.includes('arcane trickster')) {
+      char.caster_progression = '1/3';
+      if (!char.spellcasting_ability) char.spellcasting_ability = 'int';
+    }
+  }
   if (char.race_id) {
     const race = db.prepare('SELECT name, speed_json, ability_json, darkvision FROM races WHERE id = ?').get(char.race_id);
     if (race) {
@@ -442,11 +451,30 @@ router.get('/', (req, res) => {
   res.json(parsed);
 });
 
+const ABILITY_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
+
+function validateLevel(level) {
+  const lvl = Number(level);
+  if (!Number.isInteger(lvl) || lvl < 1 || lvl > 20) return null;
+  return lvl;
+}
+
+function validateAbilityScores(scores) {
+  if (!scores || typeof scores !== 'object') return 'ability_scores must be an object';
+  for (const key of ABILITY_KEYS) {
+    const v = Number(scores[key]);
+    if (!Number.isInteger(v) || v < 1 || v > 30) {
+      return `ability_scores.${key} must be an integer between 1 and 30`;
+    }
+  }
+  return null;
+}
+
 // ── POST /api/characters ───────────────────────────────────────
 router.post('/', (req, res) => {
   const {
     name, class_id, subclass_id, race_id, background_id,
-    level = 1, experience_points = 0, alignment,
+    experience_points = 0, alignment,
     ability_scores = {str:10,dex:10,con:10,int:10,wis:10,cha:10},
     stat_overrides = {}, skill_proficiencies = {},
     spellcasting_type, spellbook = [], spells_known = [], feats = [],
@@ -456,6 +484,12 @@ router.post('/', (req, res) => {
   } = req.body;
 
   if (!name) return res.status(400).json({ error: 'name is required' });
+
+  const level = validateLevel(req.body.level ?? 1);
+  if (level === null) return res.status(400).json({ error: 'level must be an integer between 1 and 20' });
+
+  const abilityError = validateAbilityScores(ability_scores);
+  if (abilityError) return res.status(400).json({ error: abilityError });
 
   // Determine spellcasting type from class if not provided
   let spellType = spellcasting_type;
@@ -474,13 +508,15 @@ router.post('/', (req, res) => {
   }
 
   // Calculate starting HP from class hit die + CON mod
-  let startHp = hp_max;
+  let startHp = Number.isFinite(Number(hp_max)) && Number(hp_max) >= 1 ? Math.floor(Number(hp_max)) : null;
   if (!startHp && class_id) {
     const cls = db.prepare('SELECT hit_die FROM classes WHERE id = ?').get(class_id);
     if (cls) {
       const conMod = Math.floor((ability_scores.con - 10) / 2);
-      startHp = cls.hit_die + conMod + ((level - 1) * (Math.floor(cls.hit_die / 2) + 1 + conMod));
-      startHp = Math.max(1, startHp);
+      // PHB: each level past 1st grants a minimum of 1 hit point even with a
+      // negative CON modifier.
+      const perLevel = Math.max(1, Math.floor(cls.hit_die / 2) + 1 + conMod);
+      startHp = Math.max(1, cls.hit_die + conMod) + ((level - 1) * perLevel);
     }
   }
 
@@ -577,6 +613,14 @@ router.put('/:id', (req, res) => {
     'backstory','personality_traits','ideals','bonds','flaws','appearance','portrait_url',
   ];
 
+  if (req.body.level !== undefined && validateLevel(req.body.level) === null) {
+    return res.status(400).json({ error: 'level must be an integer between 1 and 20' });
+  }
+  if (req.body.ability_scores !== undefined) {
+    const abilityError = validateAbilityScores(req.body.ability_scores);
+    if (abilityError) return res.status(400).json({ error: abilityError });
+  }
+
   const updates = [];
   const params = {};
 
@@ -636,9 +680,25 @@ router.put('/:id/state', (req, res) => {
   const body = req.body;
   const toJson = v => v !== undefined ? JSON.stringify(v) : undefined;
 
+  // 5e bounds: HP never drops below 0 (0 HP means dying, not negative), temp
+  // HP is never negative, and death saves cap at 3 successes / 3 failures.
+  const clampHp = v => {
+    if (v === undefined) return undefined;
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+  };
+  const clampDeathSaves = ds => {
+    if (ds === undefined) return undefined;
+    const clampCount = v => Math.min(3, Math.max(0, Math.floor(Number(v) || 0)));
+    return {
+      successes: clampCount(ds?.successes),
+      failures: clampCount(ds?.failures),
+    };
+  };
+
   const fields = {
-    hp_current: body.hp_current,
-    hp_temp: body.hp_temp,
+    hp_current: clampHp(body.hp_current),
+    hp_temp: clampHp(body.hp_temp),
     hp_temp_source: body.hp_temp_source,
     spell_slots_used_json: toJson(body.spell_slots_used),
     hit_dice_used_json: toJson(body.hit_dice_used),
@@ -648,8 +708,8 @@ router.put('/:id/state', (req, res) => {
     conditions_json: toJson(body.conditions),
     class_resources_json: toJson(body.class_resources),
     combat_active: body.combat_active !== undefined ? (body.combat_active ? 1 : 0) : undefined,
-    combat_round: body.combat_round,
-    death_saves_json: toJson(body.death_saves),
+    combat_round: body.combat_round !== undefined ? Math.max(1, Math.floor(Number(body.combat_round) || 1)) : undefined,
+    death_saves_json: toJson(clampDeathSaves(body.death_saves)),
     log_json: toJson(body.log),
   };
 

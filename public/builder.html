@@ -1398,6 +1398,9 @@ function updateArmorAC() {
   else ac = 10 + dexMod;
 
   if (armor !== 'shield') F.stat_overrides.ac = ac;
+  // Persist the armor type so the sheet can recompute AC live when DEX or
+  // class features change instead of relying on this frozen snapshot.
+  F.stat_overrides.armor_type = armor;
   const hint = document.getElementById('armorHint');
   if (hint) hint.textContent = `Sets AC to ${armor !== 'shield' ? ac : 'base + 2'}`;
   renderReview();

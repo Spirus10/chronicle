@@ -276,6 +276,31 @@ function buildEffect({ name, sourceType, sourceId, scope, kind, priority, durati
   };
 }
 
+// Cantrip scaling sentences ("This spell's damage increases by 1d6 when you
+// reach 5th level (2d6)...") describe replacement tiers, not additive dice.
+const CANTRIP_SCALING_TEXT = /increases by .{0,60}when you reach/i;
+
+/**
+ * Normalizes 5etools scalingLevelDice data into level→dice maps.
+ * @param {Object|Object[]} sld - scalingLevelDice entry or array of entries
+ * @returns {{label: string|null, map: Object}[]} Normalized scaling maps
+ */
+function normalizeScalingLevelDice(sld) {
+  const list = Array.isArray(sld) ? sld : (sld ? [sld] : []);
+  const maps = [];
+  for (const entry of list) {
+    const scaling = entry?.scaling;
+    if (!scaling || typeof scaling !== 'object') continue;
+    const map = {};
+    for (const [lvl, dice] of Object.entries(scaling)) {
+      const n = parseInt(lvl, 10);
+      if (Number.isFinite(n) && dice) map[n] = String(dice);
+    }
+    if (Object.keys(map).length) maps.push({ label: entry.label || null, map });
+  }
+  return maps;
+}
+
 /**
  * Determines the duration type string from a spell's duration data.
  * @param {Object} spell - Spell data with duration array
@@ -298,13 +323,64 @@ function durationTypeFromSpell(spell) {
  * @returns {Object} Spell effect definition
  */
 function buildSpellEffect(spell, scope) {
-  const entriesSignals = collectEntrySignals([spell.entries || [], spell.entriesHigherLevel || []]);
+  const scalingMaps = normalizeScalingLevelDice(spell.scalingLevelDice);
+
+  // Flat damage/dice/healing tokens come from the base entries only.
+  // "At Higher Levels" text and cantrip scaling sentences describe
+  // replacements keyed to level, never dice added on top of the base roll.
+  const allBaseTexts = collectEntryStrings([spell.entries || []]);
+  const baseTexts = [];
+  const scalingTexts = [];
+  for (const text of allBaseTexts) {
+    (CANTRIP_SCALING_TEXT.test(text) ? scalingTexts : baseTexts).push(text);
+  }
+  const entriesSignals = collectEntrySignals(baseTexts);
+  const higherSignals = collectEntrySignals([spell.entriesHigherLevel || []]);
+  entriesSignals.scaledamage.push(...higherSignals.scaledamage);
+  entriesSignals.scaledice.push(...higherSignals.scaledice);
+
+  // Fallback for scaling cantrips missing structured scalingLevelDice data:
+  // parse tiers out of the scaling sentence itself.
+  if (!scalingMaps.length && scalingTexts.length) {
+    const map = {};
+    for (const text of scalingTexts) {
+      const pairRe = /(\d+)(?:st|nd|rd|th) level \(\{@(?:damage|dice) ([^}]+)\}\)/gi;
+      let m;
+      while ((m = pairRe.exec(text)) !== null) map[parseInt(m[1], 10)] = m[2].trim();
+    }
+    if (Object.keys(map).length) {
+      if (!map[1] && entriesSignals.damage.length) map[1] = entriesSignals.damage[0];
+      scalingMaps.push({ label: null, map });
+    }
+  }
+
+  // Dice that are really scaling tiers must not also appear as flat adds.
+  const scalingDiceValues = new Set();
+  for (const { map } of scalingMaps) Object.values(map).forEach(d => scalingDiceValues.add(d));
+  entriesSignals.damage = entriesSignals.damage.filter(d => !scalingDiceValues.has(d));
+
   const damageTypes = Array.isArray(spell.damageInflict) && spell.damageInflict.length ? spell.damageInflict : [];
   const conditions = Array.isArray(spell.conditionInflict) && spell.conditionInflict.length
     ? spell.conditionInflict.map(c => String(c).toLowerCase())
     : entriesSignals.conditions;
 
   const modifiers = [];
+
+  for (const { map } of scalingMaps) {
+    const levels = Object.keys(map).map(Number).sort((a, b) => a - b);
+    if (!levels.length) continue;
+    modifiers.push({
+      kind: 'add_dice',
+      target: 'damage',
+      value: {
+        dice: map[levels[0]],
+        scaling: map,
+        damage_type: damageTypes.length === 1 ? damageTypes[0] : null,
+        damage_types: damageTypes.length > 1 ? damageTypes : undefined,
+      },
+      tags: ['spell_damage', 'cantrip_scaling'],
+    });
+  }
 
   for (const dice of entriesSignals.damage) {
     modifiers.push({
@@ -888,6 +964,9 @@ function seedSpellEffects(scope) {
         conditions: [
           { type: 'target_has_condition', params: { condition: 'hexed', source: 'actor' } },
           { type: 'roll_type_is', params: { type: 'damage' } },
+          // RAW: Hex adds 1d6 only when the caster hits the target with an
+          // attack — never on save-based damage like Fireball.
+          { type: 'action_has_tag', params: { tag: 'attack' } },
         ],
         modifiers: [
           {

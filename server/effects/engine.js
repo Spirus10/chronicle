@@ -102,7 +102,10 @@ function conditionMatches(condition, context) {
     case 'is_concentrating':
       return !!ctx.state.concentration;
     default:
-      return true;
+      // Unknown condition types fail closed: a gated effect must never
+      // silently degrade to "always applies" because of a typo or a
+      // condition kind this engine version doesn't know yet.
+      return false;
   }
 }
 
@@ -128,9 +131,25 @@ function sortByPriority(effects) {
   return [...effects].sort((a, b) => (b.priority || 0) - (a.priority || 0));
 }
 
+// A modifier may carry value.scaling — a map of minimum character level to
+// dice (cantrip scaling: 1d6 at 1, 2d6 at 5, 3d6 at 11, 4d6 at 17). The tiers
+// replace one another; resolve to the highest tier the actor qualifies for.
+function resolveScaledValue(mod, actorLevel) {
+  const scaling = mod?.value?.scaling;
+  if (!scaling || typeof scaling !== 'object') return mod.value;
+  let best = null;
+  for (const key of Object.keys(scaling)) {
+    const lvl = Number(key);
+    if (Number.isFinite(lvl) && lvl <= actorLevel && (best === null || lvl > best)) best = lvl;
+  }
+  if (best === null) return mod.value;
+  return { ...mod.value, dice: String(scaling[best]) };
+}
+
 /**
  * Collects all applicable modifiers from a list of effects given a context.
  * Filters effects by conditions, sorts by priority, and handles exclusive tags.
+ * Deduplicates same-named effects and resolves level-scaled dice values.
  * @param {Object[]} effects - Array of effect definitions
  * @param {Object} [context] - Context to evaluate conditions against
  * @returns {{applicable: Object[], modifiers: Object[]}} Applicable effects and their modifiers
@@ -138,10 +157,20 @@ function sortByPriority(effects) {
 function collectModifiers(effects, context) {
   const applicable = effects.filter(e => effectApplies(e, context));
   const sorted = sortByPriority(applicable);
+  const actorLevel = Number(normalizeContext(context).actor.level) || 1;
   const modifiers = [];
   const seenExclusive = new Set();
+  const seenNames = new Set();
 
   for (const effect of sorted) {
+    // 5e: the effects of the same spell/feature cast or applied more than
+    // once don't combine — only the most potent (highest priority here)
+    // instance applies. PHB "Combining Magical Effects".
+    const nameKey = normalizeName(effect.name);
+    if (nameKey) {
+      if (seenNames.has(nameKey)) continue;
+      seenNames.add(nameKey);
+    }
     for (const mod of (effect.modifiers || [])) {
       const modTags = Array.isArray(mod.tags) ? mod.tags : [];
       const exclusiveTag = modTags.find(t => String(t).startsWith('exclusive:'));
@@ -149,7 +178,12 @@ function collectModifiers(effects, context) {
         if (seenExclusive.has(exclusiveTag)) continue;
         seenExclusive.add(exclusiveTag);
       }
-      modifiers.push({ ...mod, source_effect: effect.name, priority: effect.priority });
+      modifiers.push({
+        ...mod,
+        value: resolveScaledValue(mod, actorLevel),
+        source_effect: effect.name,
+        priority: effect.priority,
+      });
     }
   }
 

@@ -27,6 +27,7 @@ app.use('/api/spells', require('./routes/spells'));
 app.use('/api/feats', require('./routes/feats'));
 app.use('/api/backgrounds', require('./routes/backgrounds'));
 app.use('/api/optional-features', require('./routes/optional-features'));
+app.use('/api/weapons', require('./routes/weapons'));
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/campaigns', require('./routes/campaigns'));
 app.use('/api/dm-tools', require('./routes/dm-tools'));

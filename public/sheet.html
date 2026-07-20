@@ -496,6 +496,7 @@ body::before{content:'';position:fixed;inset:0;background:
 // ── State ─────────────────────────────────────────────────────────
 const charId = new URLSearchParams(location.search).get('id');
 let char = null, state = null, progression = null, classFeatures = [], subFeatures = [];
+let classDetail = null, weaponRefByName = {};
 let allSpells = [], spellsById = {};
 let spellDetailsById = {};
 let spellDetailsByName = {};
@@ -626,11 +627,17 @@ async function init() {
 
     // Load class data
     if (char.class_id) {
-      [progression, classFeatures] = await Promise.all([
+      [progression, classFeatures, classDetail] = await Promise.all([
         API.get(`/classes/${char.class_id}/progression`),
         API.get(`/classes/${char.class_id}/features?level=${char.level}`),
+        API.get(`/classes/${char.class_id}`).catch(() => null),
       ]);
     }
+
+    // Weapon reference data (finesse/ranged properties, categories)
+    const weaponRef = await API.get('/weapons').catch(() => []);
+    weaponRefByName = {};
+    for (const w of (weaponRef || [])) weaponRefByName[String(w.name).toLowerCase()] = w;
     if (char.subclass_id && char.class_id) {
       subFeatures = await API.get(`/classes/${char.class_id}/subclasses/${char.subclass_id}/features?level=${char.level}`);
     }
@@ -740,6 +747,26 @@ function openEditForActiveTab() {
 }
 
 // ── Derived stats ─────────────────────────────────────────────────
+// PHB armor table: base AC and how DEX applies per armor type. Medium armor
+// caps DEX at +2; heavy armor ignores DEX.
+function computeArmorAC(armorType, dex) {
+  switch (armorType) {
+    case 'unarmored':   return 10 + dex;
+    case 'mage_armor':  return 13 + dex;
+    case 'leather':     return 11 + dex;
+    case 'studded':     return 12 + dex;
+    case 'chain_shirt': return 13 + Math.min(2, dex);
+    case 'scale':       return 14 + Math.min(2, dex);
+    case 'half_plate':  return 15 + Math.min(2, dex);
+    case 'ring':        return 14;
+    case 'chain':       return 16;
+    case 'splint':      return 17;
+    case 'plate':       return 18;
+    case 'shield':      return 12 + dex; // 10 + DEX + 2 (shield)
+    default:            return null;
+  }
+}
+
 function getStats() {
   const stats = calcStats({
     level: char.level,
@@ -750,13 +777,63 @@ function getStats() {
     class_save_proficiencies: char.class_save_proficiencies || [],
     race_speed: char.race_speed || { walk: 30 },
   });
-  if (state?.class_resources?.mage_armor_active) {
+
+  const overrides = char.stat_overrides || {};
+  const armorType = overrides.armor_type || null;
+  const cls = (char.class_name || '').toLowerCase();
+  const wearingArmor = !!armorType && !['unarmored', 'shield', 'mage_armor'].includes(armorType);
+
+  // Live AC from equipped armor type (tracks DEX changes), falling back to
+  // the stored override for characters created before armor_type was saved.
+  const armorAc = armorType ? computeArmorAC(armorType, stats.mods.dex) : null;
+  if (armorAc != null) stats.ac = armorAc;
+
+  // Unarmored Defense: barbarian 10 + DEX + CON (shield allowed), monk
+  // 10 + DEX + WIS (no armor, no shield).
+  if (!wearingArmor) {
+    if (cls === 'barbarian') {
+      const shieldBonus = armorType === 'shield' ? 2 : 0;
+      stats.ac = Math.max(stats.ac, 10 + stats.mods.dex + stats.mods.con + shieldBonus);
+    }
+    if (cls === 'monk' && armorType !== 'shield') {
+      stats.ac = Math.max(stats.ac, 10 + stats.mods.dex + stats.mods.wis);
+    }
+  }
+
+  if (state?.class_resources?.mage_armor_active && !wearingArmor) {
     stats.ac = Math.max(stats.ac, 13 + stats.mods.dex);
   }
-  if (hasSelectedFeatureName('Defense')) {
+  // RAW: the Defense fighting style applies only while wearing armor.
+  if (hasSelectedFeatureName('Defense') && wearingArmor) {
     stats.ac += 1;
   }
   return stats;
+}
+
+// ── RAW class resource maximums (PHB class tables) ────────────────
+function rageMaxFor(level) {
+  return level >= 20 ? 999 : level >= 17 ? 6 : level >= 12 ? 5 : level >= 6 ? 4 : level >= 3 ? 3 : 2;
+}
+function actionSurgeMaxFor(level) { return level >= 17 ? 2 : level >= 2 ? 1 : 0; }
+function indomitableMaxFor(level) { return level >= 17 ? 3 : level >= 13 ? 2 : level >= 9 ? 1 : 0; }
+function kiMaxFor(level) { return level >= 2 ? level : 0; }
+function sorceryPointsMaxFor(level) { return level >= 2 ? level : 0; }
+// Van Richten's: Form of Dread has proficiency-bonus uses per long rest.
+function formOfDreadMaxFor(level) { return profBonus(level); }
+// PHB: 2 uses from level 2; Archdruid (level 20) makes them unlimited.
+function wildShapeMaxFor(level) { return level >= 20 ? 999 : level >= 2 ? 2 : 0; }
+
+// Max HP comes from the stored override; when absent, derive the PHB
+// fixed-average value from the class hit die and CON rather than guessing
+// from current HP (which made healing and long rests no-ops).
+function getMaxHp() {
+  const override = Number(char.stat_overrides?.hp_max);
+  if (Number.isFinite(override) && override > 0) return override;
+  const die = Number(char.hit_die) || 8;
+  const conMod = abilityMod(char.ability_scores?.con || 10);
+  const perLevel = Math.max(1, Math.floor(die / 2) + 1 + conMod);
+  const lvl = Math.max(1, Number(char.level) || 1);
+  return Math.max(1, die + conMod) + (lvl - 1) * perLevel;
 }
 
 function selectedOptionalFeatureIds() {
@@ -975,7 +1052,7 @@ function renderHpPanel() {
   const container = document.getElementById('hpPanel');
   if (!container) return;
   const hp = state.hp_current;
-  const hpMaxVal = char.stat_overrides?.hp_max || state.hp_current + Math.max(0, state.hp_temp);
+  const hpMaxVal = getMaxHp();
   const bHalf = hp <= Math.floor(hpMaxVal / 2);
   container.innerHTML = `
     <div class="card-label">❤ Hit Points</div>
@@ -1101,8 +1178,8 @@ function renderOverview() {
   const lvlProg = progression?.find(r => r.level === char.level);
   const hitDie = char.hit_die || 8;
   const hp = state.hp_current;
-  const hpMax = char.stat_overrides?.hp_max || (progression ? null : null) || state.hp_current; // fallback
-  const hpMaxVal = char.stat_overrides?.hp_max || state.hp_current + Math.max(0, state.hp_temp);
+  const hpMax = getMaxHp();
+  const hpMaxVal = getMaxHp();
   const tmp = state.hp_temp || 0;
   const pct = Math.min(100, (hp / Math.max(1, hpMaxVal)) * 100);
   const bHalf = hp <= Math.floor(hpMaxVal / 2);
@@ -1183,7 +1260,7 @@ function renderTracker() {
   const stats = getStats();
   const lvlProg = progression?.find(r => r.level === char.level);
   const hp = state.hp_current;
-  const hpMaxVal = char.stat_overrides?.hp_max || state.hp_current + Math.max(0, state.hp_temp);
+  const hpMaxVal = getMaxHp();
   const bHalf = hp <= Math.floor(hpMaxVal / 2);
   const slotHtml = renderSlotSection(lvlProg);
   const trackerStatsHtml = renderTrackerCombatStats(stats);
@@ -1609,9 +1686,29 @@ function setSpellSlotChoice(spellId, slotLevel) {
 
 function extractDamageExpression(text) {
   const raw = String(text || '');
-  const matches = raw.match(/\b\d+d\d+(?:\s*[+\-]\s*\d+)?\b/gi) || [];
-  if (!matches.length) return '';
-  return matches.map(m => m.replace(/\s+/g, '')).join('+');
+  // Scaling sentences ("This spell's damage increases by 1d6 when you reach
+  // 5th level (2d6)..." / "...increases by 1d6 for each slot level above
+  // 3rd") describe replacement tiers, never dice added to the base roll.
+  const scalingSentences = raw.match(/[^.]*increases by[^.]*\./gi) || [];
+  let base = raw;
+  const tiers = {};
+  for (const sentence of scalingSentences) {
+    base = base.replace(sentence, ' ');
+    const pairRe = /(\d+)(?:st|nd|rd|th) level \((\d+d\d+)\)/gi;
+    let m;
+    while ((m = pairRe.exec(sentence)) !== null) tiers[parseInt(m[1], 10)] = m[2];
+  }
+  const matches = base.match(/\b\d+d\d+(?:\s*[+\-]\s*\d+)?\b/gi) || [];
+  const parts = matches.map(m => m.replace(/\s+/g, ''));
+  if (!parts.length) return '';
+  // Cantrip scaling: use the highest tier this character's level qualifies for.
+  const level = Number(char?.level) || 1;
+  const qualifying = Object.keys(tiers).map(Number).filter(l => l <= level);
+  if (qualifying.length) {
+    const dice = tiers[Math.max(...qualifying)];
+    if (dice) parts[0] = dice;
+  }
+  return parts.join('+');
 }
 
 function shortDuration(text) {
@@ -1676,7 +1773,7 @@ function isEffectActive(name) {
 
 
 function isHexActive() {
-  return String(state.concentration || '').toLowerCase() === 'hex';
+  return String(state.concentration || '').toLowerCase() === 'hex' || isEffectActive('Hex');
 }
 
 function isHealingSpell(label) {
@@ -1690,11 +1787,15 @@ function isHealingSpell(label) {
 function getDamageModifiers(label, opts = {}) {
   const mods = [];
   const lower = String(label || '').toLowerCase();
-  if (hasSelectedFeatureName('Agonizing Blast') && lower.includes('eldritch blast')) {
+  // Server-resolved expressions already include feature modifiers such as
+  // Agonizing Blast; only add them for locally built expressions.
+  if (!opts.serverResolved && hasSelectedFeatureName('Agonizing Blast') && lower.includes('eldritch blast')) {
     const chaMod = abilityMod(char.ability_scores?.cha || 10);
     if (chaMod) mods.push({ label: 'Agonizing Blast', expr: String(chaMod) });
   }
-  if (!opts.isHealing && isHexActive()) {
+  // RAW: Hex adds 1d6 necrotic only when the caster hits the cursed target
+  // with an attack — never on save-based damage.
+  if (!opts.isHealing && opts.isAttack && isHexActive()) {
     mods.push({ label: 'Hex', expr: '1d6' });
   }
   return mods;
@@ -1711,10 +1812,12 @@ function buildDamageExpression(label, baseExpr, opts = {}) {
 function getActiveDamageModifierLabels() {
   const labels = [];
   if (hasSelectedFeatureName('Agonizing Blast')) {
-    const stats = getStats();
-    if (stats.spellAtk) labels.push(`Agonizing Blast +${stats.spellAtk}`);
+    // Agonizing Blast adds the CHA modifier to damage, not the spell attack
+    // bonus (which includes proficiency).
+    const chaMod = abilityMod(char.ability_scores?.cha || 10);
+    if (chaMod) labels.push(`Agonizing Blast +${chaMod}`);
   }
-  if (isEffectActive('Hex')) labels.push('Hex +1d6');
+  if (isHexActive()) labels.push('Hex +1d6 (attacks)');
   return labels;
 }
 
@@ -1737,16 +1840,16 @@ function rollDiceExpression(expr) {
   return { total, rolls, mod };
 }
 
-function rollDamage(label, expr, isHealing = false) {
+function rollDamage(label, expr, isHealing = false, isAttack = false) {
   const opts = typeof isHealing === 'object'
-    ? { isHealing: !!isHealing.isHealing, skipModifiers: !!isHealing.skipModifiers, applyHealing: !!isHealing.applyHealing }
-    : { isHealing: !!isHealing, skipModifiers: false, applyHealing: false };
+    ? { isHealing: !!isHealing.isHealing, skipModifiers: !!isHealing.skipModifiers, applyHealing: !!isHealing.applyHealing, isAttack: !!isHealing.isAttack, serverResolved: !!isHealing.serverResolved }
+    : { isHealing: !!isHealing, skipModifiers: false, applyHealing: false, isAttack: !!isAttack, serverResolved: false };
   const baseExpr = String(expr || '').trim();
   if (!baseExpr) {
     toast('No damage dice to roll.', 'warn');
     return;
   }
-  const modifiers = opts.skipModifiers ? [] : getDamageModifiers(label, { isHealing: opts.isHealing });
+  const modifiers = opts.skipModifiers ? [] : getDamageModifiers(label, { isHealing: opts.isHealing, isAttack: opts.isAttack, serverResolved: opts.serverResolved });
   const parts = [{ label: 'Base', expr: baseExpr }];
   for (const mod of modifiers) {
     if (mod?.expr) parts.push(mod);
@@ -1814,6 +1917,46 @@ function entriesToTooltipMarkdown(entries, title = '') {
   const fallback = toPlainEntryText(list);
   if (!fallback) return '';
   return title ? `### ${title}\n\n${fallback}` : fallback;
+}
+
+function weaponRefFor(item) {
+  return weaponRefByName[String(item?.name || '').trim().toLowerCase()] || null;
+}
+
+// RAW: ranged weapons use DEX, finesse weapons use the higher of STR/DEX,
+// everything else (including thrown melee weapons) uses STR.
+function weaponAttackAbilityMod(item, stats) {
+  const strMod = stats.mods?.str || 0;
+  const dexMod = stats.mods?.dex || 0;
+  const ref = weaponRefFor(item);
+  if (!ref) return strMod;
+  if (ref.ranged) return dexMod;
+  const props = (ref.properties || []).map(p => String(p).split('|')[0].trim().toUpperCase());
+  if (props.includes('F')) return Math.max(strMod, dexMod);
+  return strMod;
+}
+
+// RAW: proficiency bonus applies to a weapon attack only if the character is
+// proficient with that weapon (by category or by name). Unknown weapons or
+// missing class data default to proficient.
+function isProficientWithWeapon(item) {
+  const ref = weaponRefFor(item);
+  const profs = classDetail?.data?.startingProficiencies?.weapons;
+  if (!ref || !Array.isArray(profs)) return true;
+  let simple = false, martial = false;
+  const names = [];
+  for (const p of profs) {
+    const token = typeof p === 'string' ? p : String(p?.proficiency || p?.item || '');
+    const t = token.toLowerCase();
+    if (t.includes('simple')) { simple = true; continue; }
+    if (t.includes('martial')) { martial = true; continue; }
+    const m = t.match(/\{@item ([^|}]+)/);
+    names.push((m ? m[1] : t).trim());
+  }
+  const cat = String(ref.category || '').toLowerCase();
+  if (simple && cat === 'simple') return true;
+  if (martial && cat === 'martial') return true;
+  return names.includes(String(ref.name || '').toLowerCase());
 }
 
 function buildWeaponTooltipMarkdown(item, hitdc, damage) {
@@ -2005,12 +2148,29 @@ function effectConditions(effect) {
     .filter(Boolean);
 }
 
+// Modifiers may carry value.scaling — a map of minimum character level to
+// dice (cantrip scaling). The tiers replace one another; pick the highest
+// tier this character qualifies for.
+function scaledModDice(mod) {
+  const value = mod?.value || {};
+  const scaling = value.scaling;
+  if (!scaling || typeof scaling !== 'object') return value.dice;
+  const level = Number(char?.level) || 1;
+  let best = null;
+  for (const key of Object.keys(scaling)) {
+    const lvl = Number(key);
+    if (Number.isFinite(lvl) && lvl <= level && (best === null || lvl > best)) best = lvl;
+  }
+  return best === null ? value.dice : String(scaling[best]);
+}
+
 function effectDamageParts(effect, stats) {
   if (!effect?.modifiers) return [];
   const parts = [];
   for (const mod of effect.modifiers) {
     if (mod.kind === 'add_dice' && mod.target === 'damage') {
-      if (mod.value?.dice) parts.push(String(mod.value.dice));
+      const dice = scaledModDice(mod);
+      if (dice) parts.push(String(dice));
     }
     if (mod.kind === 'add_ability_mod') {
       const ability = mod.value?.ability;
@@ -2100,7 +2260,8 @@ function buildDamageExpressionFromModifiers(modifiers, stats, opts = {}) {
   const parts = [];
   for (const mod of modifiers) {
     if (mod.kind === 'add_dice' && mod.target === (opts.isHealing ? 'healing' : 'damage')) {
-      if (mod.value?.dice) parts.push(String(mod.value.dice));
+      const dice = scaledModDice(mod);
+      if (dice) parts.push(String(dice));
     }
     if (mod.kind === 'add_ability_mod') {
       const ability = mod.value?.ability;
@@ -2127,11 +2288,12 @@ async function resolveDamageForRows(rootEl, selector, tags = [], filter = null) 
     const actionName = row.getAttribute('data-action-name');
     const btn = row.querySelector('.action-dmg-btn');
     const isHealing = row.getAttribute('data-action-healing') === 'true';
+    const isAttack = row.getAttribute('data-action-attack') === 'true';
     if (!actionName || !btn) return null;
-    return { row, actionName, btn, isHealing };
+    return { row, actionName, btn, isHealing, isAttack };
   }).filter(Boolean);
 
-  const resolved = await Promise.all(jobs.map(j => resolveActionDamage(j.actionName, tags, filter)));
+  const resolved = await Promise.all(jobs.map(j => resolveActionDamage(j.actionName, j.isAttack ? [...tags, 'attack'] : tags, filter)));
   resolved.forEach((mods, idx) => {
     if (!mods) return;
     const j = jobs[idx];
@@ -2141,8 +2303,8 @@ async function resolveDamageForRows(rootEl, selector, tags = [], filter = null) 
       ? buildDamageExpressionFromParts([baseExpr, modExpr])
       : (baseExpr || modExpr);
     if (!expr) return;
-    j.btn.textContent = buildDamageExpression(j.actionName, expr, { isHealing: j.isHealing });
-    j.btn.setAttribute('onclick', `rollDamage('${escapeAttr(j.actionName)}','${escapeAttr(expr)}',${JSON.stringify({ isHealing: j.isHealing, skipModifiers: true })})`);
+    j.btn.textContent = buildDamageExpression(j.actionName, expr, { isHealing: j.isHealing, isAttack: j.isAttack, serverResolved: true });
+    j.btn.setAttribute('onclick', `rollDamage('${escapeAttr(j.actionName)}','${escapeAttr(expr)}',${JSON.stringify({ isHealing: j.isHealing, isAttack: j.isAttack, serverResolved: true, skipModifiers: false })})`);
   });
 }
 
@@ -2312,7 +2474,7 @@ function renderHPBar() {
   const bh = document.getElementById('belowHalf');
   const hp = state.hp_current;
   const tmp = state.hp_temp || 0;
-  const hpMax = char.stat_overrides?.hp_max || hp + tmp;
+  const hpMax = getMaxHp();
   const bHalf = hp <= Math.floor(hpMax / 2);
   if (bh) { bh.className = bHalf ? 'below-half' : 'below-half hidden'; }
 }
@@ -2320,7 +2482,7 @@ function renderHPBar() {
 function renderHPValues() {
   const hp = state.hp_current;
   const tmp = state.hp_temp || 0;
-  const hpMax = char.stat_overrides?.hp_max || hp + tmp;
+  const hpMax = getMaxHp();
   const frac = document.getElementById('hpFractionVal');
   const temp = document.getElementById('hpTempVal');
   if (frac) frac.textContent = `${hp} / ${hpMax}`;
@@ -2573,6 +2735,7 @@ function renderActions() {
       isSpell: true,
       actionKind: 'spell',
       actionName: 'Eldritch Blast',
+      isAttack: true,
     }));
 
     // Vampiric Bite (Dhampir / Undead flavor)
@@ -2582,7 +2745,7 @@ function renderActions() {
       const biteNotes = buildNotesFromEffect(biteEffect);
       buttons.push(spellBtn('🦇 Vampiric Bite', '#cc4040', false, res.bite_used, 'useBite()', biteTooltip, 'attack', {
         range: '5 ft',
-        hitdc: `+${abilityMod(char.ability_scores?.con || 10)}`,
+        hitdc: modStr(stats.pb + abilityMod(char.ability_scores?.con || 10)),
         damage: buildDamageExpressionFromParts(effectDamageParts(biteEffect, stats)) || '1d4',
         notes: biteNotes,
         actionKind: 'feature',
@@ -2592,7 +2755,7 @@ function renderActions() {
 
     // Form of Dread (Undead patron)
     if (char.subclass_name?.toLowerCase().includes('undead')) {
-      const fuMax = char.level >= 15 ? 4 : char.level >= 10 ? 3 : 2;
+      const fuMax = formOfDreadMaxFor(char.level);
       const fuUsed = res.form_uses || 0;
       const formActive = !!res.form_active;
       const fodEffect = getEffectByName('Form of Dread');
@@ -2619,7 +2782,7 @@ function renderActions() {
 
   // ── Barbarian ─────────────────────────────────────────────────
   if (cls === 'barbarian') {
-    const rageMax = char.level >= 20 ? 999 : char.level >= 17 ? 6 : char.level >= 13 ? 5 : char.level >= 9 ? 4 : char.level >= 6 ? 3 : 2;
+    const rageMax = rageMaxFor(char.level);
     const ragesUsed = res.rages_used || 0;
     const raging = !!res.raging;
     const rageEffect = getEffectByName('Rage');
@@ -2649,7 +2812,7 @@ function renderActions() {
       forceOnclick: true,
     }));
     if (char.level >= 2) {
-      const asMax = char.level >= 17 ? 2 : char.level >= 2 ? 1 : 0;
+      const asMax = actionSurgeMaxFor(char.level);
       const asUsed = res.action_surge_used || 0;
       const asEffect = getEffectByName('Action Surge');
       const asTooltip = effectTooltipText(asEffect, 'Action Surge') || getActionTooltip('action_surge', 'Action Surge');
@@ -2657,8 +2820,8 @@ function renderActions() {
       buttons.push(spellBtn(`⚡ Action Surge (${asMax - asUsed}/${asMax})`, '#e8c170', false, asUsed >= asMax, 'useActionSurge()', asTooltip, 'action', { range: 'Self', notes: asNotes, actionKind: 'feature', actionName: 'Action Surge' }));
     }
     if (char.level >= 9) {
-      const indMax = char.level >= 17 ? 3 : char.level >= 13 ? 2 : 1;
-      const indUsed = res.indomitable_used || 0;
+      const indMax = indomitableMaxFor(char.level);
+      const indUsed = Number(res.indomitable_used) || 0;
       const indEffect = getEffectByName('Indomitable');
       const indTooltip = effectTooltipText(indEffect, 'Indomitable') || getActionTooltip('indomitable', 'Indomitable');
       const indNotes = buildNotesFromEffect(indEffect);
@@ -2668,7 +2831,7 @@ function renderActions() {
 
   // ── Monk ──────────────────────────────────────────────────────
   if (cls === 'monk') {
-    const kiMax = char.level;
+    const kiMax = kiMaxFor(char.level);
     const kiUsed = res.ki_used || 0;
     const kiEffect = getEffectByName('Ki');
     const kiTooltip = effectTooltipText(kiEffect, 'Ki') || getActionTooltip('ki', 'Ki');
@@ -2677,7 +2840,7 @@ function renderActions() {
     const fobEffect = getEffectByName('Flurry of Blows');
     const fobTooltip = effectTooltipText(fobEffect, 'Flurry of Blows') || getActionTooltip('flurry_of_blows', 'Flurry of Blows');
     const fobNotes = buildNotesFromEffect(fobEffect, kiNotes ? [kiNotes] : []);
-    buttons.push(spellBtn('👊 Flurry of Blows', '#cc6040', false, (res.ki_used||0)+2 > kiMax, 'useKi(2)', fobTooltip, 'bonus', { range: 'Melee', notes: fobNotes, actionKind: 'feature', actionName: 'Flurry of Blows' }));
+    buttons.push(spellBtn('👊 Flurry of Blows', '#cc6040', false, (res.ki_used||0)+1 > kiMax, 'useKi(1)', fobTooltip, 'bonus', { range: 'Melee', notes: fobNotes, actionKind: 'feature', actionName: 'Flurry of Blows' }));
     if (char.level >= 2) {
       const sowEffect = getEffectByName('Step of the Wind');
       const sowTooltip = effectTooltipText(sowEffect, 'Step of the Wind') || getActionTooltip('step_of_wind', 'Step of the Wind');
@@ -2718,7 +2881,7 @@ function renderActions() {
   // ── Sorcerer ──────────────────────────────────────────────────
   if (cls === 'sorcerer') {
     if (char.level >= 2) {
-    const spMax = char.level;
+    const spMax = sorceryPointsMaxFor(char.level);
     const spUsed = res.sorcery_points_used || 0;
     const spEffect = getEffectByName('Font of Magic');
     const spTooltip = effectTooltipText(spEffect, 'Sorcery Points') || getActionTooltip('sorcery_points', 'Sorcery Points');
@@ -2749,7 +2912,7 @@ function renderActions() {
   // ── Bard ──────────────────────────────────────────────────────
   if (cls === 'bard') {
     const biDie = char.level >= 15 ? 'd12' : char.level >= 10 ? 'd10' : char.level >= 5 ? 'd8' : 'd6';
-    const biMax = char.spellcasting_ability ? abilityMod(char.ability_scores?.cha || 10) : 1;
+    const biMax = Math.max(1, abilityMod(char.ability_scores?.cha || 10));
     const biUsed = res.bardic_inspiration_used || 0;
     const biRemain = Math.max(0, biMax - biUsed);
     const biEffect = getEffectByName('Bardic Inspiration');
@@ -2760,7 +2923,7 @@ function renderActions() {
 
   // ── Druid ─────────────────────────────────────────────────────
   if (cls === 'druid') {
-    const wcMax = char.level >= 18 ? 999 : char.level >= 6 ? 2 : char.level >= 2 ? 1 : 0;
+    const wcMax = wildShapeMaxFor(char.level);
     const wcUsed = res.wild_shape_used || 0;
     if (wcMax > 0) {
       const wsEffect = getEffectByName('Wild Shape');
@@ -2786,11 +2949,20 @@ function renderActions() {
   const weaponItems = (inventory || []).filter(i => i.item_type === 'weapon' && i.equipped);
   if (weaponItems.length) {
     for (const item of weaponItems) {
+      const abilityModVal = weaponAttackAbilityMod(item, stats);
+      const proficient = isProficientWithWeapon(item);
       const atkBonus = item.weapon_atk_bonus == null
-        ? (stats.pb + (stats.mods?.str || 0))
+        ? ((proficient ? stats.pb : 0) + abilityModVal)
         : parseInt(item.weapon_atk_bonus, 10);
       const hitdc = Number.isFinite(atkBonus) ? modStr(atkBonus) : '—';
-      const dmg = item.weapon_damage || '';
+      const baseDmg = item.weapon_damage || weaponRefFor(item)?.damage_dice || '';
+      // RAW: the ability modifier used for the attack roll is added to weapon
+      // damage. Skip when the stored damage string already ends in a flat
+      // modifier (assume the user baked it in).
+      const hasBakedMod = /[+\-]\s*\d+\s*$/.test(baseDmg);
+      const dmg = baseDmg && abilityModVal && !hasBakedMod
+        ? `${baseDmg}${modStr(abilityModVal)}`
+        : baseDmg;
       const notes = item.notes || '';
       const tooltip = buildWeaponTooltipMarkdown(item, hitdc, dmg || '—');
       buttons.push(spellBtn(`⚔ ${item.name}`, '#cc6040', false, false, `addLog('Attack: ${escapeAttr(item.name)}')`, tooltip, 'attack', {
@@ -2801,6 +2973,7 @@ function renderActions() {
         notes,
         actionKind: 'weapon',
         actionName: item.name,
+        isAttack: true,
       }));
     }
   }
@@ -2861,6 +3034,7 @@ function renderActions() {
         isHealing: isHeal,
         actionKind: 'spell',
         actionName: sp.name,
+        isAttack: !!((effectMeta.spell_attack && effectMeta.spell_attack.length) || sp.attack_type || sp.attack_roll),
       }));
     }
   }
@@ -2913,7 +3087,7 @@ function spellBtn(label, color, active, dim, onclick, tooltip = '', type = 'othe
       ? (extractDamageDice(tooltip) || extractDamageDice(label))
       : (extractDamageExpression(tooltip) || extractDamageExpression(label)));
   const rollExpr = dmgFromMeta || dmgFromTip;
-  const displayExpr = rollExpr ? buildDamageExpression(label, rollExpr, { isHealing: meta.isHealing }) : '';
+  const displayExpr = rollExpr ? buildDamageExpression(label, rollExpr, { isHealing: meta.isHealing, isAttack: meta.isAttack }) : '';
   const fallbackLabel = meta.useAction ? 'Use' : (meta.isSpell ? 'Cast' : 'Use');
   const damage = escapeHtml(displayExpr || fallbackLabel);
   const useDisabled = dim ? 'disabled' : '';
@@ -2921,10 +3095,10 @@ function spellBtn(label, color, active, dim, onclick, tooltip = '', type = 'othe
   const btnClass = 'action-dmg-btn';
   const useRollAction = rollExpr && !meta.forceOnclick;
   const btnAction = useRollAction
-    ? `rollDamage('${escapeAttr(label)}','${escapeAttr(rollExpr)}',${meta.isHealing ? 'true' : 'false'})`
+    ? `rollDamage('${escapeAttr(label)}','${escapeAttr(rollExpr)}',${meta.isHealing ? 'true' : 'false'},${meta.isAttack ? 'true' : 'false'})`
     : onclick;
   return `
-    <div class="action-row" data-action-type="${type}" data-action-name="${escapeAttr(actionName)}" data-action-kind="${escapeAttr(meta.actionKind || '')}" data-action-healing="${meta.isHealing ? 'true' : 'false'}" data-action-base-damage="${escapeAttr(meta.baseDamage || '')}" style="border-color:${active ? color : 'var(--border)'};${rowStyle}">
+    <div class="action-row" data-action-type="${type}" data-action-name="${escapeAttr(actionName)}" data-action-kind="${escapeAttr(meta.actionKind || '')}" data-action-healing="${meta.isHealing ? 'true' : 'false'}" data-action-attack="${meta.isAttack ? 'true' : 'false'}" data-action-base-damage="${escapeAttr(meta.baseDamage || '')}" style="border-color:${active ? color : 'var(--border)'};${rowStyle}">
       <div class="action-name" data-tip="${tip}" style="color:${active ? color : 'var(--text)'}">${name}</div>
       <div class="action-range">${range}</div>
       <div class="action-hit">${hitdc}</div>
@@ -2970,6 +3144,7 @@ function durationToRounds(durationText) {
 // ── HP actions ───────────────────────────────────────────────────
 function applyDmg(amt) {
   if (amt <= 0) return;
+  const wasAtZero = state.hp_current === 0;
   let rem = amt, tL = 0, hL = 0, retl = false;
   if (state.hp_temp > 0) {
     tL = Math.min(state.hp_temp, rem);
@@ -2992,6 +3167,13 @@ function applyDmg(amt) {
   if (necroticHuskTriggered) {
     const rests = state.class_resources?.necrotic_husk_recover_rests || 0;
     addLog(`☠ Necrotic Husk triggered: reduced to 1 HP. Recovery in ${rests} long rest${rests === 1 ? '' : 's'}.`);
+  }
+  // RAW: any damage taken while at 0 HP causes a death saving throw failure.
+  if (wasAtZero && !necroticHuskTriggered) {
+    state.death_saves = state.death_saves || { successes: 0, failures: 0 };
+    state.death_saves.failures = Math.min(3, (state.death_saves.failures || 0) + 1);
+    addLog(`💀 Damage at 0 HP: death save failure (${state.death_saves.failures}/3).`);
+    if (state.death_saves.failures >= 3) addLog('💀 Three death save failures — character is dead.');
   }
   updateHPDisplay();
 }
@@ -3017,7 +3199,7 @@ function tryTriggerNecroticHusk() {
 
 function applyHeal(amt) {
   if (amt <= 0) return;
-  const hpMax = char.stat_overrides?.hp_max || state.hp_current;
+  const hpMax = getMaxHp();
   const h = Math.min(amt, hpMax - state.hp_current);
   state.hp_current = Math.min(hpMax, state.hp_current + h);
   addLog(`Healed ${h} HP`);
@@ -3076,8 +3258,9 @@ function toggleDS(type, idx) {
 
 function stabilize() {
   state.death_saves = { successes: 0, failures: 0 };
-  state.hp_current = 1;
-  addLog('Character stabilized at 1 HP.');
+  // RAW: a stabilized creature remains at 0 HP and unconscious; it regains
+  // HP only from healing (or 1 HP after 1d4 hours).
+  addLog('Character stabilized — unconscious at 0 HP until healed.');
   debouncedSaveState();
   renderHpPanel();
   renderExtras();
@@ -3327,15 +3510,19 @@ function endCombat() {
 function nextRound() {
   state.combat_round++;
   const res = state.class_resources || {};
-  // Tick effect durations
+  // Tick effect durations. Effects with duration_rounds 0 are indefinite
+  // (permanent, or tracked in minutes/hours) and must persist across rounds;
+  // only effects whose timer just ran out are removed.
   const expired = [];
-  state.active_effects = (state.active_effects || []).map(e => {
-    if (e.duration_rounds > 0) {
-      e.duration_rounds--;
-      if (e.duration_rounds <= 0) expired.push(e.name);
+  state.active_effects = (state.active_effects || []).filter(e => {
+    if (!(e.duration_rounds > 0)) return true;
+    e.duration_rounds--;
+    if (e.duration_rounds <= 0) {
+      expired.push(e.name);
+      return false;
     }
-    return e;
-  }).filter(e => !expired.includes(e.name));
+    return true;
+  });
   expired.forEach(n => addLog(`${n} expired.`));
   // Reset per-round resources
   if ((char.class_name||'').toLowerCase() === 'warlock') {
@@ -3372,14 +3559,18 @@ function doShortRest() {
   if (cls === 'barbarian') { delete res.raging; }
   if (cls === 'fighter') { delete res.action_surge_used; delete res.second_wind_used; }
   if (cls === 'monk') { res.ki_used = 0; }
-  if (cls === 'druid') { res.wild_shape_used = 0; res.wild_shaped = false; }
-  if (cls === 'cleric' || cls === 'paladin') { res.channel_divinity_used = 0; }
-  if (cls === 'bard' && char.level >= 5) { res.bardic_inspiration_used = 0; }
+  // RAW short-rest recoveries: Channel Divinity (cleric/paladin), Wild Shape
+  // (druid), and Font of Inspiration (bard 5+).
+  if (cls === 'cleric' || cls === 'paladin') { delete res.channel_divinity_used; }
+  if (cls === 'druid') { delete res.wild_shape_used; }
+  if (cls === 'bard' && char.level >= 5) { delete res.bardic_inspiration_used; }
   state.class_resources = res;
   state.combat_active = false;
   state.combat_round = 0;
-  state.active_effects = [];
-  state.concentration = null;
+  // A rest ends combat, so round-based effects expire — but longer-lived
+  // effects (Mage Armor, 1-hour spells) and concentration can be maintained
+  // through a 1-hour short rest.
+  state.active_effects = (state.active_effects || []).filter(e => !(e.duration_rounds > 0));
   debouncedSaveState();
   renderHpPanel();
   renderExtras();
@@ -3388,7 +3579,7 @@ function doShortRest() {
 }
 
 function doLongRest() {
-  const hpMax = char.stat_overrides?.hp_max || state.hp_current;
+  const hpMax = getMaxHp();
   state.hp_current = hpMax;
   state.hp_temp = 0;
   state.hp_temp_source = null;
@@ -3444,7 +3635,7 @@ function useBite() {
   if (res.bite_used) { addLog('Vampiric Bite already used this round!'); return; }
   res.bite_used = true;
   state.class_resources = res;
-  const hpMax = char.stat_overrides?.hp_max || state.hp_current;
+  const hpMax = getMaxHp();
   let msg = 'Vampiric Bite: 1d4 piercing';
   if (state.hp_current <= Math.floor(hpMax / 2)) {
     const chaMod = abilityMod(char.ability_scores?.cha || 10);
@@ -3457,7 +3648,7 @@ function useBite() {
 
 function activateForm() {
   const res = state.class_resources || {};
-  const fuMax = char.level >= 15 ? 4 : char.level >= 10 ? 3 : 2;
+  const fuMax = formOfDreadMaxFor(char.level);
   if (res.form_active) {
     res.form_active = false;
     state.class_resources = res;
@@ -3490,7 +3681,7 @@ function activateForm() {
 
 function toggleRage() {
   const res = state.class_resources || {};
-  const rageMax = char.level >= 20 ? 999 : char.level >= 17 ? 6 : char.level >= 13 ? 5 : char.level >= 9 ? 4 : char.level >= 6 ? 3 : 2;
+  const rageMax = rageMaxFor(char.level);
   if (!res.raging) {
     if ((res.rages_used || 0) >= rageMax) { addLog('No rages remaining!'); return; }
     res.raging = true;
@@ -3532,7 +3723,7 @@ function useSecondWind() {
 
 function useActionSurge() {
   const res = state.class_resources || {};
-  const max = char.level >= 17 ? 2 : 1;
+  const max = actionSurgeMaxFor(char.level);
   if ((res.action_surge_used||0) >= max) { addLog('Action Surge already used!'); return; }
   res.action_surge_used = (res.action_surge_used||0) + 1;
   state.class_resources = res;
@@ -3543,9 +3734,10 @@ function useActionSurge() {
 
 function useIndomitable() {
   const res = state.class_resources || {};
-  const max = char.level >= 17 ? 3 : char.level >= 13 ? 2 : 1;
-  if ((res.indomitable_used || 0) >= max) { addLog(`Indomitable already used (${max}/${max})!`); return; }
-  res.indomitable_used = (res.indomitable_used || 0) + 1;
+  const max = indomitableMaxFor(char.level);
+  const used = Number(res.indomitable_used) || 0;
+  if (used >= max) { addLog('No Indomitable uses remaining!'); return; }
+  res.indomitable_used = used + 1;
   state.class_resources = res;
   addLog(`Indomitable: reroll a saving throw (${res.indomitable_used}/${max} used).`);
   debouncedSaveState();
@@ -3562,7 +3754,7 @@ function toggleSneakAttack() {
 
 function useKi(cost) {
   const res = state.class_resources || {};
-  const max = char.level;
+  const max = kiMaxFor(char.level);
   if ((res.ki_used||0) + cost > max) { addLog(`Not enough Ki points! (${max - (res.ki_used||0)} remaining)`); return; }
   res.ki_used = (res.ki_used||0) + cost;
   state.class_resources = res;
@@ -3573,7 +3765,7 @@ function useKi(cost) {
 
 function useSorceryPoint(cost) {
   const res = state.class_resources || {};
-  const max = char.level;
+  const max = sorceryPointsMaxFor(char.level);
   if ((res.sorcery_points_used||0) + cost > max) { addLog('Not enough Sorcery Points!'); return; }
   res.sorcery_points_used = (res.sorcery_points_used||0) + cost;
   state.class_resources = res;
@@ -3609,7 +3801,7 @@ function useLayOnHands() {
 
 function toggleWildShape() {
   const res = state.class_resources || {};
-  const max = char.level >= 18 ? 999 : char.level >= 6 ? 2 : 1;
+  const max = wildShapeMaxFor(char.level);
   if (!res.wild_shaped) {
     if ((res.wild_shape_used||0) >= max) { addLog('No Wild Shape uses remaining!'); return; }
     res.wild_shaped = true;
@@ -3841,7 +4033,7 @@ function renderSpells() {
       if (tomeIds.has(sp.id)) noteParts.push('Tome');
       if (bookIds.has(sp.id)) noteParts.push('Book of Ancient Secrets — ritual only');
       const notes = buildNotesFromEffect(spellEffect, noteParts);
-
+      const isAtk = !!((effectMeta.spell_attack && effectMeta.spell_attack.length) || sp.attack_type || sp.attack_roll);
       const showSlotPicker = sp.level > 0 && scalingData;
       const slotPickerHtml = showSlotPicker ? (() => {
         const chosenSlot = spellSlotChoices[sp.id] || sp.level;
@@ -3853,7 +4045,7 @@ function renderSpells() {
       })() : '';
 
       rows += `
-        <div class="action-row" data-action-name="${escapeAttr(sp.name)}" data-action-kind="spell" data-action-healing="${isHeal ? 'true' : 'false'}" data-action-base-damage="${escapeAttr(dmg)}">
+        <div class="action-row" data-action-name="${escapeAttr(sp.name)}" data-action-kind="spell" data-action-healing="${isHeal ? 'true' : 'false'}" data-action-attack="${isAtk ? 'true' : 'false'}" data-action-base-damage="${escapeAttr(dmg)}">
           <div class="action-name" data-tip="${escapeAttr(tooltip)}">${escapeHtml(sp.name)}</div>
           <div class="action-range">${escapeHtml(sp.range_text || '—')}</div>
           <div class="action-hit">${escapeHtml(hitdc)}</div>
