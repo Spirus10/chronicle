@@ -97,7 +97,8 @@ body::before{content:'';position:fixed;inset:0;background:
 .action-name{font-size:12px;color:var(--text);font-weight:600}
 .action-range,.action-hit{font-size:10px;color:var(--dim)}
 .action-notes{font-size:10px;color:var(--dim);line-height:1.4;max-height:2.8em;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
-.action-damage{display:flex;justify-content:flex-start}
+.action-damage{display:flex;justify-content:flex-start;align-items:center;gap:4px}
+.slot-select{font-size:10px;padding:2px 4px;background:var(--paper);border:1px solid var(--border);border-radius:4px;color:var(--dim);max-width:52px;cursor:pointer}
 .action-dmg-btn{padding:4px 8px;border-radius:6px;border:1px solid rgba(155,123,255,0.4);background:rgba(155,123,255,0.12);color:var(--purple);font-size:11px;cursor:pointer;white-space:nowrap}
 .action-dmg-btn.dim{opacity:0.4;cursor:default}
 @media (max-width: 820px) {
@@ -503,6 +504,7 @@ let panelActiveTab = 'actions';
 let actionFilter = 'all';
 let panelLoaded = {};
 let spellSearchQuery = '';
+let spellSlotChoices = {};
 let editingItemId = null;
 let optionalFeatureSelections = {};
 let optionalFeatureEditorOpen = {};
@@ -597,7 +599,7 @@ const CONDITIONS = [
   {k:'restrained',n:'Restrained',d:'Speed 0; attacks vs you advantage; DEX saves disadvantage.'},
   {k:'stunned',n:'Stunned',d:"Incapacitated, can't move; attacks vs you advantage."},
   {k:'unconscious',n:'Unconscious',d:"Incapacitated, unaware; hits within 5ft are crits."},
-  {k:'exhaustion',n:'Exhaustion',d:'Stacking debuff — 1:Disadv on checks, 3:Disadv on attacks/saves, 5:Speed halved/halved again, 6:Death.'},
+  {k:'exhaustion',n:'Exhaustion',d:'Stacking debuff — 1:Disadv on checks, 2:Speed halved, 3:Disadv on attacks/saves, 4:HP max halved, 5:Speed=0, 6:Death. Track level manually.'},
 ];
 
 const DAMAGE_TYPES = [
@@ -1550,6 +1552,61 @@ function extractDamageDice(text) {
   return match ? match[0].replace(/\s+/g, '') : '';
 }
 
+function cantripDiceMultiplier(level) {
+  if (level >= 17) return 4;
+  if (level >= 11) return 3;
+  if (level >= 5) return 2;
+  return 1;
+}
+
+function scaleCantripDice(baseExpr, level) {
+  const mult = cantripDiceMultiplier(level);
+  if (mult === 1 || !baseExpr) return baseExpr;
+  return baseExpr.replace(/^(\d*)d(\d+)/i, (_, n, d) => `${parseInt(n || '1', 10) * mult}d${d}`);
+}
+
+// Reads the structured scalingLevelDice field from 5etools spell data.
+// For cantrips the keys are character levels (1,5,11,17).
+// For leveled spells the keys are spell slot levels (1,2,3...).
+function getScalingDiceAtLevel(scalingLevelDice, level) {
+  if (!Array.isArray(scalingLevelDice) || !scalingLevelDice.length) return null;
+  const table = scalingLevelDice[0]?.scaling;
+  if (!table || typeof table !== 'object') return null;
+  const thresholds = Object.keys(table).map(Number).sort((a, b) => a - b);
+  let dice = null;
+  for (const t of thresholds) {
+    if (level >= t) dice = table[t];
+  }
+  return dice || null;
+}
+
+// For leveled spells: returns {primary, secondary[]} where primary is the
+// first dice expression and secondary captures additional damage types.
+function extractPrimaryAndSecondaryDamage(text) {
+  const raw = String(text || '');
+  const matches = raw.match(/\b\d+d\d+(?:\s*[+\-]\s*\d+)?\b/gi) || [];
+  const primary = matches[0]?.replace(/\s+/g, '') || '';
+  const secondary = matches.slice(1).map(m => m.replace(/\s+/g, '')).filter(Boolean);
+  return { primary, secondary };
+}
+
+// Returns spell slot levels available to the character that are >= minLevel.
+function availableSlotLevels(minLevel) {
+  const prog = progression?.find(r => r.level === char.level);
+  if (!prog) return [minLevel];
+  const slots = prog.spell_slots || [];
+  const levels = [];
+  for (let l = (minLevel - 1); l < 9; l++) {
+    if ((slots[l] || 0) > 0) levels.push(l + 1);
+  }
+  return levels.length ? levels : [minLevel];
+}
+
+function setSpellSlotChoice(spellId, slotLevel) {
+  spellSlotChoices[spellId] = slotLevel;
+  renderSpells();
+}
+
 function extractDamageExpression(text) {
   const raw = String(text || '');
   const matches = raw.match(/\b\d+d\d+(?:\s*[+\-]\s*\d+)?\b/gi) || [];
@@ -1712,26 +1769,6 @@ function rollDamage(label, expr, isHealing = false) {
   if (opts.applyHealing) applyHeal(total);
   renderActionEffects();
   return total;
-}
-
-// Override any malformed parser earlier in file
-function rollDiceExpression(expr) {
-  const raw = String(expr || '').trim();
-  const match = raw.match(/^(\d+)d(\d+)([+-]\d+)?$/i);
-  if (!match) return null;
-  const count = parseInt(match[1], 10);
-  const sides = parseInt(match[2], 10);
-  const mod = match[3] ? parseInt(match[3], 10) : 0;
-  if (!count || !sides) return null;
-  let total = 0;
-  const rolls = [];
-  for (let i = 0; i < count; i++) {
-    const r = Math.floor(Math.random() * sides) + 1;
-    rolls.push(r);
-    total += r;
-  }
-  total += mod;
-  return { total, rolls, mod };
 }
 
 function firstEntryText(entries) {
@@ -2612,7 +2649,7 @@ function renderActions() {
       forceOnclick: true,
     }));
     if (char.level >= 2) {
-      const asMax = char.level >= 17 ? 3 : char.level >= 2 ? 1 : 0;
+      const asMax = char.level >= 17 ? 2 : char.level >= 2 ? 1 : 0;
       const asUsed = res.action_surge_used || 0;
       const asEffect = getEffectByName('Action Surge');
       const asTooltip = effectTooltipText(asEffect, 'Action Surge') || getActionTooltip('action_surge', 'Action Surge');
@@ -2620,10 +2657,12 @@ function renderActions() {
       buttons.push(spellBtn(`⚡ Action Surge (${asMax - asUsed}/${asMax})`, '#e8c170', false, asUsed >= asMax, 'useActionSurge()', asTooltip, 'action', { range: 'Self', notes: asNotes, actionKind: 'feature', actionName: 'Action Surge' }));
     }
     if (char.level >= 9) {
+      const indMax = char.level >= 17 ? 3 : char.level >= 13 ? 2 : 1;
+      const indUsed = res.indomitable_used || 0;
       const indEffect = getEffectByName('Indomitable');
       const indTooltip = effectTooltipText(indEffect, 'Indomitable') || getActionTooltip('indomitable', 'Indomitable');
       const indNotes = buildNotesFromEffect(indEffect);
-      buttons.push(spellBtn('🔁 Indomitable', '#6080cc', false, !!res.indomitable_used, 'useIndomitable()', indTooltip, 'other', { range: 'Self', notes: indNotes, actionKind: 'feature', actionName: 'Indomitable' }));
+      buttons.push(spellBtn(`🔁 Indomitable (${indMax - indUsed}/${indMax})`, '#6080cc', false, indUsed >= indMax, 'useIndomitable()', indTooltip, 'other', { range: 'Self', notes: indNotes, actionKind: 'feature', actionName: 'Indomitable' }));
     }
   }
 
@@ -2678,12 +2717,14 @@ function renderActions() {
 
   // ── Sorcerer ──────────────────────────────────────────────────
   if (cls === 'sorcerer') {
+    if (char.level >= 2) {
     const spMax = char.level;
     const spUsed = res.sorcery_points_used || 0;
     const spEffect = getEffectByName('Font of Magic');
     const spTooltip = effectTooltipText(spEffect, 'Sorcery Points') || getActionTooltip('sorcery_points', 'Sorcery Points');
     const spNotes = buildNotesFromEffect(spEffect);
     buttons.push(spellBtn(`✨ Sorcery Points (${spMax - spUsed}/${spMax})`, '#cc60cc', false, spUsed >= spMax, 'useSorceryPoint(1)', spTooltip, 'other', { range: 'Self', notes: spNotes, actionKind: 'feature', actionName: 'Font of Magic' }));
+    }
     const mmEffect = getEffectByName('Metamagic');
     const mmTooltip = effectTooltipText(mmEffect, 'Metamagic') || getActionTooltip('metamagic', 'Metamagic');
     const mmNotes = buildNotesFromEffect(mmEffect);
@@ -3010,6 +3051,7 @@ function promptSetMaxHP() {
   char.stat_overrides.hp_max = n;
   state.hp_current = Math.min(state.hp_current, n);
   addLog(`Max HP set to ${n}.`);
+  API.put(`/characters/${charId}`, { stat_overrides: char.stat_overrides }).catch(() => {});
   updateHPDisplay();
 }
 
@@ -3036,6 +3078,7 @@ function stabilize() {
   state.death_saves = { successes: 0, failures: 0 };
   state.hp_current = 1;
   addLog('Character stabilized at 1 HP.');
+  debouncedSaveState();
   renderHpPanel();
   renderExtras();
 }
@@ -3292,7 +3335,7 @@ function nextRound() {
       if (e.duration_rounds <= 0) expired.push(e.name);
     }
     return e;
-  }).filter(e => e.duration_rounds !== 0);
+  }).filter(e => !expired.includes(e.name));
   expired.forEach(n => addLog(`${n} expired.`));
   // Reset per-round resources
   if ((char.class_name||'').toLowerCase() === 'warlock') {
@@ -3302,10 +3345,15 @@ function nextRound() {
     setEffectActive('Sneak Attack', false, '#cc9040', 0, false, 'sneak_attack');
     addLog('Sneak Attack toggled off (new round).');
   }
+  if (res.reckless) {
+    res.reckless = false;
+    addLog('Reckless Attack ended (new round).');
+  }
   state.class_resources = res;
   addLog(`── Round ${state.combat_round} ──`);
   renderCombatSection();
   renderEffects();
+  renderActions();
   debouncedSaveState();
 }
 
@@ -3324,6 +3372,9 @@ function doShortRest() {
   if (cls === 'barbarian') { delete res.raging; }
   if (cls === 'fighter') { delete res.action_surge_used; delete res.second_wind_used; }
   if (cls === 'monk') { res.ki_used = 0; }
+  if (cls === 'druid') { res.wild_shape_used = 0; res.wild_shaped = false; }
+  if (cls === 'cleric' || cls === 'paladin') { res.channel_divinity_used = 0; }
+  if (cls === 'bard' && char.level >= 5) { res.bardic_inspiration_used = 0; }
   state.class_resources = res;
   state.combat_active = false;
   state.combat_round = 0;
@@ -3345,7 +3396,7 @@ function doLongRest() {
   // Recover half hit dice (rounded up)
   const hdTotal = char.level;
   const hdUsed = Array.isArray(state.hit_dice_used) ? state.hit_dice_used.filter(Boolean).length : 0;
-  const hdRecover = Math.max(1, Math.floor(hdTotal / 2));
+  const hdRecover = Math.max(1, Math.ceil(hdTotal / 2));
   if (Array.isArray(state.hit_dice_used)) {
     let left = hdRecover;
     for (let i = 0; i < state.hit_dice_used.length && left > 0; i++) {
@@ -3401,8 +3452,7 @@ function useBite() {
     msg += ` + healed ${chaMod} HP (below half)`;
   }
   addLog(msg);
-  debouncedSaveState();
-  renderActions();
+  updateHPDisplay();
 }
 
 function activateForm() {
@@ -3482,7 +3532,7 @@ function useSecondWind() {
 
 function useActionSurge() {
   const res = state.class_resources || {};
-  const max = char.level >= 17 ? 3 : 1;
+  const max = char.level >= 17 ? 2 : 1;
   if ((res.action_surge_used||0) >= max) { addLog('Action Surge already used!'); return; }
   res.action_surge_used = (res.action_surge_used||0) + 1;
   state.class_resources = res;
@@ -3493,10 +3543,11 @@ function useActionSurge() {
 
 function useIndomitable() {
   const res = state.class_resources || {};
-  if (res.indomitable_used) { addLog('Indomitable already used!'); return; }
-  res.indomitable_used = true;
+  const max = char.level >= 17 ? 3 : char.level >= 13 ? 2 : 1;
+  if ((res.indomitable_used || 0) >= max) { addLog(`Indomitable already used (${max}/${max})!`); return; }
+  res.indomitable_used = (res.indomitable_used || 0) + 1;
   state.class_resources = res;
-  addLog('Indomitable: reroll a saving throw.');
+  addLog(`Indomitable: reroll a saving throw (${res.indomitable_used}/${max} used).`);
   debouncedSaveState();
   renderActions();
 }
@@ -3515,7 +3566,7 @@ function useKi(cost) {
   if ((res.ki_used||0) + cost > max) { addLog(`Not enough Ki points! (${max - (res.ki_used||0)} remaining)`); return; }
   res.ki_used = (res.ki_used||0) + cost;
   state.class_resources = res;
-  addLog(`Used ${cost} Ki point${cost>1?'s':`(${max - res.ki_used} remaining)`}`);
+  addLog(`Used ${cost} Ki point${cost > 1 ? 's' : ''} (${max - res.ki_used} remaining).`);
   debouncedSaveState();
   renderActions();
 }
@@ -3758,10 +3809,30 @@ function renderSpells() {
             : (sp.attack_type || sp.attack_roll ? `+${stats.spellAtk}` : '—');
       const dmgFromEffect = buildDamageExpressionFromParts(isHeal ? effectHealingParts(spellEffect, stats) : effectDamageParts(spellEffect, stats));
       const baseText = toPlainEntryText(detail?.data?.entries || detail?.entries || '');
-      const dmgRaw = isHeal ? (extractDamageDice(baseText) || '') : (extractDamageExpression(baseText) || '');
+      const scalingData = detail?.data?.scalingLevelDice || null;
+      const noteParts = [];
+      let dmgRaw = '';
+
+      if (isHeal) {
+        dmgRaw = extractDamageDice(baseText) || '';
+      } else if (sp.level === 0) {
+        // Cantrip: prefer structured scalingLevelDice, fall back to PHB tier table
+        dmgRaw = getScalingDiceAtLevel(scalingData, char.level)
+          || scaleCantripDice(extractDamageDice(baseText) || '', char.level);
+      } else if (scalingData) {
+        // Leveled spell with structured slot scaling — use chosen slot
+        const chosenSlot = spellSlotChoices[sp.id] || sp.level;
+        dmgRaw = getScalingDiceAtLevel(scalingData, chosenSlot) || extractDamageDice(baseText) || '';
+      } else {
+        // Leveled spell, no structured scaling — use first dice match only.
+        // Secondary damage types (e.g. ice knife: 1d6 piercing + 2d6 cold) go to notes.
+        const { primary, secondary } = extractPrimaryAndSecondaryDamage(baseText);
+        dmgRaw = primary;
+        if (secondary.length) noteParts.push(`+${secondary.join('/')} on secondary`);
+      }
+
       const dmg = String(sp.name || '').toLowerCase() === 'hex' ? '' : (dmgFromEffect || dmgRaw);
       const displayExpr = dmg ? buildDamageExpression(sp.name, dmg, { isHealing: isHeal }) : '';
-      const noteParts = [];
       const comps = formatComponents(sp.components);
       if (comps && comps !== '—') noteParts.push(comps);
       if (sp.duration_text) noteParts.push(shortDuration(sp.duration_text));
@@ -3770,12 +3841,24 @@ function renderSpells() {
       if (tomeIds.has(sp.id)) noteParts.push('Tome');
       if (bookIds.has(sp.id)) noteParts.push('Book of Ancient Secrets — ritual only');
       const notes = buildNotesFromEffect(spellEffect, noteParts);
+
+      const showSlotPicker = sp.level > 0 && scalingData;
+      const slotPickerHtml = showSlotPicker ? (() => {
+        const chosenSlot = spellSlotChoices[sp.id] || sp.level;
+        const slotLevels = availableSlotLevels(sp.level);
+        const opts = slotLevels.map(l =>
+          `<option value="${l}"${l === chosenSlot ? ' selected' : ''}>${ordinal(l)}</option>`
+        ).join('');
+        return `<select class="slot-select" title="Slot level" onchange="setSpellSlotChoice(${sp.id},parseInt(this.value))">${opts}</select>`;
+      })() : '';
+
       rows += `
-        <div class="action-row" data-action-name="${escapeAttr(sp.name)}" data-action-kind="spell" data-action-healing="${isHeal ? 'true' : 'false'}">
+        <div class="action-row" data-action-name="${escapeAttr(sp.name)}" data-action-kind="spell" data-action-healing="${isHeal ? 'true' : 'false'}" data-action-base-damage="${escapeAttr(dmg)}">
           <div class="action-name" data-tip="${escapeAttr(tooltip)}">${escapeHtml(sp.name)}</div>
           <div class="action-range">${escapeHtml(sp.range_text || '—')}</div>
           <div class="action-hit">${escapeHtml(hitdc)}</div>
           <div class="action-damage">
+            ${slotPickerHtml}
             <button class="action-dmg-btn" onclick="${dmg ? `rollDamage('${escapeAttr(sp.name)}','${escapeAttr(dmg)}',${isHeal ? 'true' : 'false'})` : `quickCast(${sp.id})`}">${escapeHtml(displayExpr || 'Cast')}</button>
           </div>
           <div class="action-notes">${escapeHtml(notes || noteParts.join(' · '))}</div>
