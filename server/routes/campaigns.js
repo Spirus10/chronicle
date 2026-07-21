@@ -1,26 +1,26 @@
+/**
+ * @fileoverview Campaign API routes.
+ * Handles campaign CRUD, membership management, and character attachment.
+ */
 'use strict';
 const express = require('express');
 const db = require('../db');
 const { requireAuth, requireRole } = require('../auth');
 
+const crypto = require('crypto');
 const router = express.Router();
 
 router.use(requireAuth);
 
+/**
+ * Generates random 12-character alphanumeric join code.
+ * Uses base-32 alphabet (excludes similar-looking characters).
+ * @returns {string} Random join code
+ */
 function randomJoinCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let out = '';
-  for (let i = 0; i < 8; i++) out += chars[Math.floor(Math.random() * chars.length)];
-  return out;
-}
-
-function createJoinCode() {
-  for (let i = 0; i < 10; i++) {
-    const code = randomJoinCode();
-    const existing = db.prepare('SELECT id FROM campaigns WHERE join_code = ?').get(code);
-    if (!existing) return code;
-  }
-  return `${randomJoinCode()}${Date.now().toString(36).toUpperCase()}`;
+  const bytes = crypto.randomBytes(12);
+  return Array.from(bytes).map(b => chars[b % chars.length]).join('');
 }
 
 router.post('/', requireRole('dm'), (req, res) => {
@@ -30,11 +30,23 @@ router.post('/', requireRole('dm'), (req, res) => {
   if (name.length > 120) return res.status(400).json({ error: 'Campaign name must be 120 characters or fewer' });
   if (description.length > 4000) return res.status(400).json({ error: 'Campaign description is too long' });
 
-  const joinCode = createJoinCode();
-  const result = db.prepare(`
-    INSERT INTO campaigns (name, description, join_code, dm_user_id)
-    VALUES (?, ?, ?, ?)
-  `).run(name, description, joinCode, req.user.id);
+  let result;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const joinCode = randomJoinCode();
+    try {
+      result = db.prepare(`
+        INSERT INTO campaigns (name, description, join_code, dm_user_id)
+        VALUES (?, ?, ?, ?)
+      `).run(name, description, joinCode, req.user.id);
+      break;
+    } catch (err) {
+      if (err.code === 'SQLITE_CONSTRAINT_UNIQUE' || (err.message && err.message.includes('UNIQUE constraint failed'))) {
+        if (attempt === 9) return res.status(500).json({ error: 'Failed to generate unique join code' });
+        continue;
+      }
+      throw err;
+    }
+  }
 
   const campaign = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(result.lastInsertRowid);
   res.status(201).json(campaign);

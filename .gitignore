@@ -2,6 +2,7 @@ node_modules/
 data/*.db
 data/*.db-wal
 data/*.db-shm
+reviews/
 .env
 *.log
 character-sheet.gif

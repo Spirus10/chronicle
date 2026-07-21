@@ -1,6 +1,11 @@
+/**
+ * @fileoverview Background API routes.
+ * Provides read-only access to background data.
+ */
 'use strict';
 const express = require('express');
 const db = require('../db');
+const { parseJSON } = require('../utils/json-parser');
 const router = express.Router();
 
 // GET /api/backgrounds
@@ -14,9 +19,9 @@ router.get('/', (req, res) => {
     id: r.id,
     name: r.name,
     source: r.source,
-    skill_proficiencies: JSON.parse(r.skill_proficiencies || '[]'),
-    tool_proficiencies: JSON.parse(r.tool_proficiencies || '[]'),
-    language_proficiencies: JSON.parse(r.language_proficiencies || '[]'),
+    skill_proficiencies: parseJSON(r.skill_proficiencies, []),
+    tool_proficiencies: parseJSON(r.tool_proficiencies, []),
+    language_proficiencies: parseJSON(r.language_proficiencies, []),
   })));
 });
 
@@ -32,10 +37,10 @@ router.get('/:id', (req, res) => {
     id: bg.id,
     name: bg.name,
     source: bg.source,
-    skill_proficiencies: JSON.parse(bg.skill_proficiencies || '[]'),
-    tool_proficiencies: JSON.parse(bg.tool_proficiencies || '[]'),
-    language_proficiencies: JSON.parse(bg.language_proficiencies || '[]'),
-    data: JSON.parse(bg.data_json),
+    skill_proficiencies: parseJSON(bg.skill_proficiencies, []),
+    tool_proficiencies: parseJSON(bg.tool_proficiencies, []),
+    language_proficiencies: parseJSON(bg.language_proficiencies, []),
+    data: parseJSON(bg.data_json),
   });
 });
 

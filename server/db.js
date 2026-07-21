@@ -1,3 +1,7 @@
+/**
+ * @fileoverview Database initialization and migration module.
+ * Sets up SQLite database connection, applies schema migrations, and exports the database instance.
+ */
 'use strict';
 const Database = require('better-sqlite3');
 const path = require('path');
@@ -15,6 +19,12 @@ db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 db.pragma('synchronous = NORMAL');
 
+/**
+ * Initializes database schema and applies migrations.
+ * Creates all necessary tables for game data, users, campaigns, and character state.
+ * Handles schema upgrades for backward compatibility.
+ * @returns {void}
+ */
 function migrate() {
   db.exec(`
     -- ── SEEDED GAME DATA ──────────────────────────────────────────
@@ -282,6 +292,18 @@ function migrate() {
       value TEXT NOT NULL,
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+  `);
+
+  // Indexes on foreign key columns for query performance
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_campaign_members_campaign_id ON campaign_members(campaign_id);
+    CREATE INDEX IF NOT EXISTS idx_campaign_members_player_user_id ON campaign_members(player_user_id);
+    CREATE INDEX IF NOT EXISTS idx_character_state_character_id ON character_state(character_id);
+    CREATE INDEX IF NOT EXISTS idx_characters_owner_user_id ON characters(owner_user_id);
+    CREATE INDEX IF NOT EXISTS idx_characters_campaign_id ON characters(campaign_id);
+    CREATE INDEX IF NOT EXISTS idx_inventory_character_id ON inventory(character_id);
+    CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash);
+    CREATE INDEX IF NOT EXISTS idx_spells_name ON spells(name);
   `);
 
   const inventoryCols = db.prepare('PRAGMA table_info(inventory)').all().map(c => c.name);

@@ -1,3 +1,7 @@
+/**
+ * @fileoverview Effect definition seeding module.
+ * Builds and upserts effect definitions for spells, class features, races, feats, and weapons.
+ */
 'use strict';
 
 const db = require('../db');
@@ -20,10 +24,22 @@ const insertEffectDefinition = db.prepare(`
     effect_json=excluded.effect_json
 `);
 
+/**
+ * Normalizes a source string to uppercase trimmed form.
+ * @param {string} value - Source identifier to normalize
+ * @returns {string} Uppercase trimmed source string
+ */
 function normalizeSource(value) {
   return String(value || '').trim().toUpperCase();
 }
 
+/**
+ * Checks if a data source is within the allowed scope for seeding.
+ * @param {string} source - Source identifier (e.g., 'PHB', 'SRD')
+ * @param {Object} data - Data object with optional srd/basicRules flags
+ * @param {Object} [scope] - Scope configuration with sources, includeSrd, allSources
+ * @returns {boolean} True if source is allowed
+ */
 function isAllowedSource(source, data, scope) {
   if (scope?.allSources) return true;
   const allowed = new Set((scope?.sources || DEFAULT_SCOPE.sources).map(normalizeSource));
@@ -35,6 +51,12 @@ function isAllowedSource(source, data, scope) {
   return false;
 }
 
+/**
+ * Recursively flattens nested entry structures into a flat array of strings.
+ * @param {*} value - Entry value (string, array, or object with entries)
+ * @param {string[]} out - Output array to collect strings into
+ * @returns {void}
+ */
 function flattenEntries(value, out) {
   if (!value) return;
   if (typeof value === 'string') {
@@ -51,24 +73,44 @@ function flattenEntries(value, out) {
   }
 }
 
+/**
+ * Collects all string values from nested entry structures.
+ * @param {*} entries - Entry data to flatten
+ * @returns {string[]} Array of string values
+ */
 function collectEntryStrings(entries) {
   const texts = [];
   flattenEntries(entries, texts);
   return texts.map(t => String(t));
 }
 
+/**
+ * Converts nested entry structures to a single space-joined text string.
+ * @param {*} entries - Entry data to flatten and join
+ * @returns {string} Combined text string
+ */
 function entriesToText(entries) {
   const texts = [];
   flattenEntries(entries, texts);
   return texts.map(t => String(t).trim()).filter(Boolean).join(' ');
 }
 
+/**
+ * Extracts the first dice notation (e.g., "2d6") from text.
+ * @param {string} text - Text to search for dice notation
+ * @returns {string} First dice notation found, or empty string
+ */
 function extractFirstDice(text) {
   const raw = String(text || '');
   const match = raw.match(/\b\d+d\d+\b/i);
   return match ? match[0] : '';
 }
 
+/**
+ * Extracts spell names from {@spell ...} tags in text.
+ * @param {string} text - Text containing 5e.tools spell tags
+ * @returns {string[]} Array of extracted spell names
+ */
 function extractSpellTagsFromText(text) {
   const names = [];
   if (!text) return names;
@@ -80,6 +122,11 @@ function extractSpellTagsFromText(text) {
   return names;
 }
 
+/**
+ * Extracts unique spell names from nested entry structures.
+ * @param {*} entries - Entry data containing spell tags
+ * @returns {string[]} Deduplicated array of spell names
+ */
 function extractSpellNamesFromEntries(entries) {
   const texts = collectEntryStrings(entries);
   const names = [];
@@ -87,6 +134,11 @@ function extractSpellNamesFromEntries(entries) {
   return [...new Set(names.filter(Boolean))];
 }
 
+/**
+ * Detects at-will, no-slot, and granted spell rules from entry text.
+ * @param {*} entries - Entry data to analyze
+ * @returns {{atWill: Set<string>, noSlot: Set<string>, grants: Set<string>}} Sets of spell names by rule type
+ */
 function detectAtWillSpellRules(entries) {
   const texts = collectEntryStrings(entries);
   const results = {
@@ -112,6 +164,11 @@ function detectAtWillSpellRules(entries) {
   return results;
 }
 
+/**
+ * Extracts damage, dice, condition, scaling, and healing tags from 5e.tools formatted text.
+ * @param {string} text - Text containing 5e.tools tags
+ * @returns {Object} Extracted tags by category (damage, dice, conditions, scaledamage, scaledice, healing)
+ */
 function extractTagsFromText(text) {
   const tags = {
     damage: [],
@@ -152,6 +209,11 @@ function extractTagsFromText(text) {
   return tags;
 }
 
+/**
+ * Collects all signal tags (damage, dice, conditions, etc.) from nested entries.
+ * @param {*} entries - Entry data to analyze
+ * @returns {Object} Deduplicated signals by category
+ */
 function collectEntrySignals(entries) {
   const texts = [];
   flattenEntries(entries, texts);
@@ -181,6 +243,23 @@ function collectEntrySignals(entries) {
   return signals;
 }
 
+/**
+ * Builds a standardized effect object from component parts.
+ * @param {Object} params - Effect parameters
+ * @param {string} params.name - Effect name
+ * @param {string} params.sourceType - Source type (e.g., 'spell', 'class_feature')
+ * @param {number} params.sourceId - Source database ID
+ * @param {string} params.scope - Effect scope ('actor', 'action', 'roll')
+ * @param {string} params.kind - Effect kind ('passive', 'cast', 'modifier', 'attack')
+ * @param {number} params.priority - Priority for ordering (higher = first)
+ * @param {string} params.durationType - Duration type ('permanent', 'concentration', 'instant', etc.)
+ * @param {string[]} [params.tags] - Effect tags
+ * @param {string} [params.status] - Curation status ('curated', 'needs_review', 'auto')
+ * @param {Object[]} [params.conditions] - Condition objects
+ * @param {Object[]} [params.modifiers] - Modifier objects
+ * @param {Object} [params.meta] - Additional metadata
+ * @returns {Object} Standardized effect object
+ */
 function buildEffect({ name, sourceType, sourceId, scope, kind, priority, durationType, tags, status, conditions, modifiers, meta }) {
   return {
     name,
@@ -197,6 +276,11 @@ function buildEffect({ name, sourceType, sourceId, scope, kind, priority, durati
   };
 }
 
+/**
+ * Determines the duration type string from a spell's duration data.
+ * @param {Object} spell - Spell data with duration array
+ * @returns {string} Duration type ('instant', 'permanent', 'special', 'concentration', or 'timed')
+ */
 function durationTypeFromSpell(spell) {
   const duration = Array.isArray(spell?.duration) ? spell.duration : [];
   const d = duration[0] || {};
@@ -207,6 +291,12 @@ function durationTypeFromSpell(spell) {
   return 'instant';
 }
 
+/**
+ * Builds an effect definition from a spell's data, extracting damage, healing, conditions, and scaling.
+ * @param {Object} spell - Spell data with id, name, entries, level, school, etc.
+ * @param {Object} scope - Source scope for filtering
+ * @returns {Object} Spell effect definition
+ */
 function buildSpellEffect(spell, scope) {
   const entriesSignals = collectEntrySignals([spell.entries || [], spell.entriesHigherLevel || []]);
   const damageTypes = Array.isArray(spell.damageInflict) && spell.damageInflict.length ? spell.damageInflict : [];
@@ -341,6 +431,15 @@ function buildSpellEffect(spell, scope) {
   });
 }
 
+/**
+ * Builds an effect definition from a class/optional feature.
+ * @param {Object} params - Feature parameters
+ * @param {Object} params.row - Database row with id and name
+ * @param {Array} params.entries - Feature entry data
+ * @param {string[]} params.tags - Initial tags to include
+ * @param {string} params.sourceType - Source type ('class_feature' or 'optional_feature')
+ * @returns {Object} Feature effect definition
+ */
 function buildFeatureEffect({ row, entries, tags, sourceType }) {
   const signals = collectEntrySignals(entries);
   const modifiers = [];
@@ -442,6 +541,13 @@ function buildFeatureEffect({ row, entries, tags, sourceType }) {
   });
 }
 
+/**
+ * Builds an effect definition from race data (ability bonuses, speed, darkvision, traits).
+ * @param {Object} params - Race parameters
+ * @param {Object} params.row - Database row with id and name
+ * @param {Object} params.data - Parsed race data (ability, speed, darkvision, entries)
+ * @returns {Object} Race effect definition
+ */
 function buildRaceEffect({ row, data }) {
   const tags = ['source:race'];
   const modifiers = [];
@@ -507,6 +613,13 @@ function buildRaceEffect({ row, data }) {
   });
 }
 
+/**
+ * Builds an effect definition from feat data (ability bonuses, rules text).
+ * @param {Object} params - Feat parameters
+ * @param {Object} params.row - Database row with id and name
+ * @param {Object} params.data - Parsed feat data (ability, entries)
+ * @returns {Object} Feat effect definition
+ */
 function buildFeatEffect({ row, data }) {
   const tags = ['source:feat'];
   const modifiers = [];
@@ -555,6 +668,13 @@ function buildFeatEffect({ row, data }) {
   });
 }
 
+/**
+ * Builds an effect definition from weapon data (damage dice, category, rules text).
+ * @param {Object} params - Weapon parameters
+ * @param {Object} params.row - Database row with id, name, category, damage_dice, damage_type
+ * @param {Object} params.data - Parsed weapon data (entries)
+ * @returns {Object} Weapon effect definition
+ */
 function buildWeaponEffect({ row, data }) {
   const tags = ['source:weapon'];
   if (row.category) tags.push(`weapon_category:${row.category}`);
@@ -604,6 +724,11 @@ function buildWeaponEffect({ row, data }) {
   });
 }
 
+/**
+ * Inserts or updates an effect definition in the database.
+ * @param {Object} effect - Effect object to upsert
+ * @returns {void}
+ */
 function upsertEffect(effect) {
   insertEffectDefinition.run({
     name: effect.name,
@@ -618,13 +743,12 @@ function upsertEffect(effect) {
   });
 }
 
-function seedEffectDefinitions(options = {}) {
-  const scope = {
-    sources: options.sources || DEFAULT_SCOPE.sources,
-    includeSrd: options.includeSrd ?? DEFAULT_SCOPE.includeSrd,
-    allSources: options.allSources ?? DEFAULT_SCOPE.allSources,
-  };
-
+/**
+ * Seeds effect definitions for class features and optional features.
+ * @param {Object} scope - Source scope configuration
+ * @returns {void}
+ */
+function seedClassFeatureEffects(scope) {
   const classFeatures = db.prepare(`
     SELECT cf.id, cf.name, cf.level, cf.class_id, cf.subclass_id, cf.is_subclass_feature, cf.entries_json,
            c.source AS class_source, c.data_json AS class_data,
@@ -670,55 +794,6 @@ function seedEffectDefinitions(options = {}) {
     upsertEffect(effect);
   }
 
-  const feats = db.prepare(`
-    SELECT id, name, source, data_json
-    FROM feats
-  `).all();
-
-  for (const feat of feats) {
-    const data = JSON.parse(feat.data_json || '{}');
-    if (!isAllowedSource(feat.source, data, scope)) continue;
-    const effect = buildFeatEffect({ row: feat, data });
-    upsertEffect(effect);
-  }
-
-  const spells = db.prepare(`
-    SELECT id, name, source, data_json
-    FROM spells
-  `).all();
-
-  for (const spellRow of spells) {
-    const data = JSON.parse(spellRow.data_json || '{}');
-    if (!isAllowedSource(spellRow.source, data, scope)) continue;
-    const spell = { id: spellRow.id, ...data };
-    const effect = buildSpellEffect(spell, scope);
-    upsertEffect(effect);
-  }
-
-  const weapons = db.prepare(`
-    SELECT id, name, source, category, damage_dice, damage_type, data_json
-    FROM weapons
-  `).all();
-
-  for (const weapon of weapons) {
-    const data = JSON.parse(weapon.data_json || '{}');
-    if (!isAllowedSource(weapon.source, data, scope)) continue;
-    const effect = buildWeaponEffect({ row: weapon, data });
-    upsertEffect(effect);
-  }
-
-  const races = db.prepare(`
-    SELECT id, name, source, data_json
-    FROM races
-  `).all();
-
-  for (const race of races) {
-    const data = JSON.parse(race.data_json || '{}');
-    if (!isAllowedSource(race.source, data, scope)) continue;
-    const effect = buildRaceEffect({ row: race, data });
-    upsertEffect(effect);
-  }
-
   const agonizing = db.prepare(`
     SELECT id, name, source, data_json
     FROM optional_features
@@ -753,6 +828,45 @@ function seedEffectDefinitions(options = {}) {
       };
       upsertEffect(effect);
     }
+  }
+}
+
+/**
+ * Seeds effect definitions for feats.
+ * @param {Object} scope - Source scope configuration
+ * @returns {void}
+ */
+function seedFeatEffects(scope) {
+  const feats = db.prepare(`
+    SELECT id, name, source, data_json
+    FROM feats
+  `).all();
+
+  for (const feat of feats) {
+    const data = JSON.parse(feat.data_json || '{}');
+    if (!isAllowedSource(feat.source, data, scope)) continue;
+    const effect = buildFeatEffect({ row: feat, data });
+    upsertEffect(effect);
+  }
+}
+
+/**
+ * Seeds effect definitions for spells, including special handling for Hex.
+ * @param {Object} scope - Source scope configuration
+ * @returns {void}
+ */
+function seedSpellEffects(scope) {
+  const spells = db.prepare(`
+    SELECT id, name, source, data_json
+    FROM spells
+  `).all();
+
+  for (const spellRow of spells) {
+    const data = JSON.parse(spellRow.data_json || '{}');
+    if (!isAllowedSource(spellRow.source, data, scope)) continue;
+    const spell = { id: spellRow.id, ...data };
+    const effect = buildSpellEffect(spell, scope);
+    upsertEffect(effect);
   }
 
   const hex = db.prepare(`
@@ -790,6 +904,67 @@ function seedEffectDefinitions(options = {}) {
       upsertEffect(effect);
     }
   }
+}
+
+/**
+ * Seeds effect definitions for races.
+ * @param {Object} scope - Source scope configuration
+ * @returns {void}
+ */
+function seedRaceEffects(scope) {
+  const races = db.prepare(`
+    SELECT id, name, source, data_json
+    FROM races
+  `).all();
+
+  for (const race of races) {
+    const data = JSON.parse(race.data_json || '{}');
+    if (!isAllowedSource(race.source, data, scope)) continue;
+    const effect = buildRaceEffect({ row: race, data });
+    upsertEffect(effect);
+  }
+}
+
+/**
+ * Seeds effect definitions for weapons.
+ * @param {Object} scope - Source scope configuration
+ * @returns {void}
+ */
+function seedWeaponEffects(scope) {
+  const weapons = db.prepare(`
+    SELECT id, name, source, category, damage_dice, damage_type, data_json
+    FROM weapons
+  `).all();
+
+  for (const weapon of weapons) {
+    const data = JSON.parse(weapon.data_json || '{}');
+    if (!isAllowedSource(weapon.source, data, scope)) continue;
+    const effect = buildWeaponEffect({ row: weapon, data });
+    upsertEffect(effect);
+  }
+}
+
+/**
+ * Main entry point for seeding all effect definitions.
+ * Seeds class features, feats, spells, races, and weapons.
+ * @param {Object} [options] - Seeding options
+ * @param {string[]} [options.sources] - Allowed source books
+ * @param {boolean} [options.includeSrd] - Include SRD content
+ * @param {boolean} [options.allSources] - Include all sources
+ * @returns {void}
+ */
+function seedEffectDefinitions(options = {}) {
+  const scope = {
+    sources: options.sources || DEFAULT_SCOPE.sources,
+    includeSrd: options.includeSrd ?? DEFAULT_SCOPE.includeSrd,
+    allSources: options.allSources ?? DEFAULT_SCOPE.allSources,
+  };
+
+  seedClassFeatureEffects(scope);
+  seedFeatEffects(scope);
+  seedSpellEffects(scope);
+  seedRaceEffects(scope);
+  seedWeaponEffects(scope);
 }
 
 module.exports = seedEffectDefinitions;

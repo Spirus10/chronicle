@@ -1,3 +1,7 @@
+/**
+ * @fileoverview Authentication API routes.
+ * Handles user registration, login, logout, and session management.
+ */
 'use strict';
 const express = require('express');
 const db = require('../db');
@@ -15,11 +19,22 @@ const {
 
 const router = express.Router();
 
+/**
+ * Checks if users table has legacy email column.
+ * Used for backward compatibility with mixed user schema.
+ * @returns {boolean} True if email column exists
+ */
 function usersHaveEmailColumn() {
   const cols = db.prepare('PRAGMA table_info(users)').all().map(c => c.name);
   return cols.includes('email');
 }
 
+/**
+ * Generates synthetic email for users without email column.
+ * Format: "username@local.invalid"
+ * @param {string} username - The normalized username
+ * @returns {string} Synthetic email address
+ */
 function syntheticEmail(username) {
   return `${username}@local.invalid`;
 }

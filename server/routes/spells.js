@@ -1,8 +1,20 @@
+/**
+ * @fileoverview Spell API routes.
+ * Provides filterable read-only access to spell data with class, level, school, and concentration filters.
+ */
 'use strict';
 const express = require('express');
 const db = require('../db');
+const { parseJSON } = require('../utils/json-parser');
+const { SPELL_SCHOOLS } = require('../constants/game-rules');
 const router = express.Router();
 
+/**
+ * Normalizes a spell token string for matching against database names.
+ * Strips pipe-delimited source tags and hash fragments.
+ * @param {string} token - Raw spell token to normalize
+ * @returns {string|null} Normalized lowercase spell name or null if invalid
+ */
 function normalizeSpellToken(token) {
   if (typeof token !== 'string') return null;
   const raw = token.trim();
@@ -13,6 +25,12 @@ function normalizeSpellToken(token) {
   return base;
 }
 
+/**
+ * Recursively collects spell names from nested data structures.
+ * @param {*} value - Value to extract spell names from (array, object, or string)
+ * @param {Set<string>} out - Set to collect normalized spell names into
+ * @returns {void}
+ */
 function collectSpellNames(value, out) {
   if (Array.isArray(value)) {
     value.forEach(v => collectSpellNames(v, out));
@@ -26,10 +44,15 @@ function collectSpellNames(value, out) {
   if (token) out.add(token);
 }
 
+/**
+ * Gets expanded spell list names for a subclass from its additionalSpells data.
+ * @param {number} subclassId - Subclass database ID
+ * @returns {string[]} Array of normalized spell names from the subclass expanded list
+ */
 function getSubclassExpandedSpellNames(subclassId) {
   const row = db.prepare('SELECT data_json FROM subclasses WHERE id = ?').get(subclassId);
   if (!row) return [];
-  const data = JSON.parse(row.data_json || '{}');
+  const data = parseJSON(row.data_json);
   const names = new Set();
   collectSpellNames(data.additionalSpells || [], names);
   return [...names];
@@ -84,8 +107,12 @@ router.get('/', (req, res) => {
   }
 
   if (req.query.school) {
+    const school = req.query.school.toUpperCase();
+    if (!SPELL_SCHOOLS.includes(school)) {
+      return res.status(400).json({ error: 'Invalid spell school' });
+    }
     conditions.push(`school = ?`);
-    params.push(req.query.school.toUpperCase());
+    params.push(school);
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -98,10 +125,10 @@ router.get('/', (req, res) => {
 
   res.json(rows.map(r => ({
     ...r,
-    components: JSON.parse(r.components_json || '{}'),
-    damage_types: JSON.parse(r.damage_types || '[]'),
-    saving_throws: JSON.parse(r.saving_throws || '[]'),
-    class_list: JSON.parse(r.class_list || '[]'),
+    components: parseJSON(r.components_json),
+    damage_types: parseJSON(r.damage_types, []),
+    saving_throws: parseJSON(r.saving_throws, []),
+    class_list: parseJSON(r.class_list, []),
     components_json: undefined,
   })));
 });
@@ -126,11 +153,11 @@ router.get('/:id', (req, res) => {
     duration_text: spell.duration_text,
     concentration: !!spell.concentration,
     ritual: !!spell.ritual,
-    components: JSON.parse(spell.components_json || '{}'),
-    damage_types: JSON.parse(spell.damage_types || '[]'),
-    saving_throws: JSON.parse(spell.saving_throws || '[]'),
-    class_list: JSON.parse(spell.class_list || '[]'),
-    data: JSON.parse(spell.data_json),
+    components: parseJSON(spell.components_json),
+    damage_types: parseJSON(spell.damage_types, []),
+    saving_throws: parseJSON(spell.saving_throws, []),
+    class_list: parseJSON(spell.class_list, []),
+    data: parseJSON(spell.data_json),
   });
 });
 

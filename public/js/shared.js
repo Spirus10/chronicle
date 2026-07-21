@@ -1,9 +1,31 @@
+/**
+ * @fileoverview Shared client-side utilities for the Chronicle D&D tracker.
+ * Provides API helpers, 5e tag rendering, ability score calculations, and UI utilities.
+ */
 'use strict';
-/* ================================================================
-   shared.js — utilities used across all pages
-   ================================================================ */
+
+// ── HTML Escaping ────────────────────────────────────────────────
+/**
+ * Escapes HTML special characters in a string using DOM text content.
+ * @param {string} text - The raw text to escape
+ * @returns {string} HTML-escaped string
+ */
+function escapeHtml(text) {
+  if (typeof text !== 'string') return text;
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
 
 // ── API ──────────────────────────────────────────────────────────
+/**
+ * Makes an authenticated API request with automatic 401 redirect handling.
+ * @async
+ * @param {string} path - API path (without /api prefix)
+ * @param {Object} [options] - Fetch options (method, headers, body, etc.)
+ * @returns {Promise<Object>} Parsed JSON response
+ * @throws {Error} If response is not ok (error message from server or generic)
+ */
 async function apiRequest(path, options = {}) {
   const r = await fetch(`/api${path}`, options);
   if (r.status === 401 && !location.pathname.endsWith('/login.html')) {
@@ -13,15 +35,33 @@ async function apiRequest(path, options = {}) {
   }
   if (!r.ok) {
     const err = await r.json().catch(() => ({}));
-    throw new Error(err.error || `${options.method || 'GET'} ${path} -> ${r.status}`);
+    const userMessage = err.error || 'An error occurred. Please try again.';
+    throw new Error(userMessage);
   }
   return r.json();
 }
 
+/**
+ * API helper object with convenience methods for HTTP verbs.
+ * @namespace
+ */
 const API = {
+  /**
+   * Makes a GET request.
+   * @async
+   * @param {string} path - API path
+   * @returns {Promise<Object>} Parsed JSON response
+   */
   async get(path) {
     return apiRequest(path, { method: 'GET' });
   },
+  /**
+   * Makes a POST request with JSON body.
+   * @async
+   * @param {string} path - API path
+   * @param {Object} body - Request body to serialize as JSON
+   * @returns {Promise<Object>} Parsed JSON response
+   */
   async post(path, body) {
     return apiRequest(path, {
       method: 'POST',
@@ -29,6 +69,13 @@ const API = {
       body: JSON.stringify(body),
     });
   },
+  /**
+   * Makes a PUT request with JSON body.
+   * @async
+   * @param {string} path - API path
+   * @param {Object} body - Request body to serialize as JSON
+   * @returns {Promise<Object>} Parsed JSON response
+   */
   async put(path, body) {
     return apiRequest(path, {
       method: 'PUT',
@@ -36,28 +83,53 @@ const API = {
       body: JSON.stringify(body),
     });
   },
+  /**
+   * Makes a DELETE request.
+   * @async
+   * @param {string} path - API path
+   * @returns {Promise<Object>} Parsed JSON response
+   */
   async del(path) {
     return apiRequest(path, { method: 'DELETE' });
   },
 };
 
+/**
+ * Authentication API helper object.
+ * @namespace
+ */
 const Auth = {
+  /** @returns {Promise<Object>} Current user info */
   me() {
     return API.get('/auth/me');
   },
+  /**
+   * @param {Object} payload - Login credentials {username, password}
+   * @returns {Promise<Object>} User info with session
+   */
   login(payload) {
     return API.post('/auth/login', payload);
   },
+  /**
+   * @param {Object} payload - Registration data {username, password, role}
+   * @returns {Promise<Object>} Created user info with session
+   */
   register(payload) {
     return API.post('/auth/register', payload);
   },
+  /** @returns {Promise<Object>} Logout confirmation */
   logout() {
     return API.post('/auth/logout', {});
   },
 };
 
 // ── 5e Tag Renderer ──────────────────────────────────────────────
-// Converts {@tag content} notation to readable HTML
+/**
+ * Converts a single 5e.tools {@tag content} notation to HTML.
+ * @param {string} tag - Tag name (e.g., 'spell', 'damage', 'condition')
+ * @param {string} content - Tag content text
+ * @returns {string} HTML string
+ */
 function renderTag(tag, content) {
   const t = tag.toLowerCase();
   switch (t) {
@@ -90,17 +162,33 @@ function renderTag(tag, content) {
   }
 }
 
+/**
+ * Replaces all {@tag content} patterns in a string with rendered HTML.
+ * @param {string} text - Text containing 5e.tools tags
+ * @returns {string} Text with tags replaced by HTML
+ */
 function renderTagString(text) {
   if (!text || typeof text !== 'string') return text || '';
   // Match {@tag content} with nested braces handled by replacing inner first
   return text.replace(/\{@(\w+) ([^{}]*)\}/g, (_, tag, content) => renderTag(tag, content));
 }
 
+/**
+ * Extracts the display label from a pipe-delimited tag content string.
+ * @param {string} content - Tag content (may contain pipe-delimited source)
+ * @returns {string} Display label (first segment before pipe)
+ */
 function tagLabel(content) {
   const raw = String(content || '');
   return raw.split('|')[0]?.trim() || raw.trim();
 }
 
+/**
+ * Converts a single 5e.tools tag to Markdown-friendly output.
+ * @param {string} tag - Tag name
+ * @param {string} content - Tag content text
+ * @returns {string} Markdown-formatted string
+ */
 function renderTagMarkdown(tag, content) {
   const t = String(tag || '').toLowerCase();
   const label = tagLabel(content);
@@ -174,11 +262,21 @@ function renderTagMarkdown(tag, content) {
   }
 }
 
+/**
+ * Replaces all {@tag content} patterns in a string with Markdown output.
+ * @param {string} text - Text containing 5e.tools tags
+ * @returns {string} Text with tags replaced by Markdown
+ */
 function renderTagStringMarkdown(text) {
   if (!text || typeof text !== 'string') return text || '';
   return text.replace(/\{@([A-Za-z]+) ([^{}]*)\}/g, (_, tag, content) => renderTagMarkdown(tag, content));
 }
 
+/**
+ * Renders a 5e.tools table entry as a Markdown table string.
+ * @param {Object} entry - Table entry with colLabels and rows arrays
+ * @returns {string} Markdown-formatted table
+ */
 function markdownTableFromEntry(entry) {
   const headers = (entry.colLabels || []).map(h => renderTagStringMarkdown(String(h || '')));
   const rows = (entry.rows || []).map(row => {
@@ -199,6 +297,13 @@ function markdownTableFromEntry(entry) {
   return [`| ${headers.join(' | ')} |`, divider, ...rows].join('\n');
 }
 
+/**
+ * Renders a single 5e.tools entry object to Markdown.
+ * Handles entries, lists, tables, insets, quotes, ability DCs, and references.
+ * @param {string|Object} entry - Entry to render (string or typed object)
+ * @param {number} [depth=0] - Nesting depth for heading levels
+ * @returns {string} Markdown string
+ */
 function renderEntryMarkdown(entry, depth = 0) {
   if (typeof entry === 'string') return renderTagStringMarkdown(entry);
   if (!entry || typeof entry !== 'object') return '';
@@ -258,6 +363,12 @@ function renderEntryMarkdown(entry, depth = 0) {
   }
 }
 
+/**
+ * Renders an array of 5e.tools entries to Markdown, joined by double newlines.
+ * @param {Array} entries - Array of entry objects or strings
+ * @param {number} [depth=0] - Nesting depth for heading levels
+ * @returns {string} Combined Markdown string
+ */
 function renderEntriesMarkdown(entries, depth = 0) {
   if (!entries || !Array.isArray(entries)) return '';
   return entries
@@ -268,7 +379,13 @@ function renderEntriesMarkdown(entries, depth = 0) {
     .trim();
 }
 
-// Render a 5e.tools entries array to HTML
+/**
+ * Renders an array of 5e.tools entries to HTML.
+ * Handles entries, lists, tables, insets, quotes, ability DCs, and references.
+ * @param {Array} entries - Array of entry objects or strings
+ * @param {number} [depth=0] - Nesting depth for heading tag selection
+ * @returns {string} Combined HTML string
+ */
 function renderEntries(entries, depth = 0) {
   if (!entries || !Array.isArray(entries)) return '';
   return entries.map(entry => {
@@ -312,20 +429,20 @@ function renderEntries(entries, depth = 0) {
         return `<blockquote class="entry-inset">${title}${renderEntries(entry.entries || [], depth + 1)}</blockquote>`;
       }
       case 'abilityDc': {
-        return `<p><strong>Spell save DC</strong> = 8 + your proficiency bonus + your ${entry.attributes?.join('/') ?? '?'} modifier</p>`;
+        return `<p><strong>Spell save DC</strong> = 8 + your proficiency bonus + your ${escapeHtml(entry.attributes?.join('/') ?? '?')} modifier</p>`;
       }
       case 'abilityAttackMod': {
-        return `<p><strong>Spell attack modifier</strong> = your proficiency bonus + your ${entry.attributes?.join('/') ?? '?'} modifier</p>`;
+        return `<p><strong>Spell attack modifier</strong> = your proficiency bonus + your ${escapeHtml(entry.attributes?.join('/') ?? '?')} modifier</p>`;
       }
       case 'refOptionalfeature':
-        return `<p class="ref-feature">See: ${entry.optionalfeature}</p>`;
+        return `<p class="ref-feature">See: ${escapeHtml(entry.optionalfeature)}</p>`;
       case 'refClassFeature':
-        return `<p class="ref-feature">See: ${entry.classFeature}</p>`;
+        return `<p class="ref-feature">See: ${escapeHtml(entry.classFeature)}</p>`;
       case 'options': {
         return renderEntries(entry.entries || [], depth + 1);
       }
       case 'quote':
-        return `<blockquote class="entry-quote"><p>${renderTagString(entry.entries?.join(' ') || '')}</p>${entry.by ? `<footer>— ${entry.by}</footer>` : ''}</blockquote>`;
+        return `<blockquote class="entry-quote"><p>${renderTagString(entry.entries?.join(' ') || '')}</p>${entry.by ? `<footer>— ${escapeHtml(entry.by)}</footer>` : ''}</blockquote>`;
       default:
         if (entry.entries) return renderEntries(entry.entries, depth + 1);
         return '';
@@ -334,10 +451,20 @@ function renderEntries(entries, depth = 0) {
 }
 
 // ── Ability Score Utilities ───────────────────────────────────────
+/**
+ * Calculates the ability score modifier.
+ * @param {number} score - Ability score (e.g., 10, 16)
+ * @returns {number} Modifier value (e.g., 0, +3)
+ */
 function abilityMod(score) {
   return Math.floor((score - 10) / 2);
 }
 
+/**
+ * Formats a modifier as a signed string (e.g., +2, -1).
+ * @param {number} mod - Modifier value
+ * @returns {string} Signed modifier string
+ */
 function modStr(mod) {
   return mod >= 0 ? `+${mod}` : `${mod}`;
 }
@@ -368,11 +495,21 @@ const SKILLS = [
 
 const PROFICIENCY_BONUS = [0, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 6];
 
+/**
+ * Returns the proficiency bonus for a given character level.
+ * @param {number} level - Character level (1-20)
+ * @returns {number} Proficiency bonus
+ */
 function profBonus(level) {
   return PROFICIENCY_BONUS[Math.max(1, Math.min(20, level))];
 }
 
-// Calculate all derived stats for a character
+/**
+ * Calculates all derived stats for a character (AC, initiative, saves, skills, spell stats, etc.).
+ * Respects stat_overrides for manual override of any computed value.
+ * @param {Object} char - Character object with ability_scores, level, stat_overrides, etc.
+ * @returns {Object} Computed stats: {ac, initiative, speed, spellDC, spellAtk, spellMod, pb, mods, saves, skills, passivePerception}
+ */
 function calcStats(char) {
   const scores = char.ability_scores || {str:10,dex:10,con:10,int:10,wis:10,cha:10};
   const overrides = char.stat_overrides || {};
@@ -436,6 +573,11 @@ const SCHOOL_NAMES = {
 };
 
 // ── Ordinals ─────────────────────────────────────────────────────
+/**
+ * Converts a number to its ordinal string (e.g., 1 -> "1st", 2 -> "2nd").
+ * @param {number} n - The number to convert
+ * @returns {string} Ordinal string
+ */
 function ordinal(n) {
   const s = ['th','st','nd','rd'];
   const v = n % 100;
@@ -443,6 +585,12 @@ function ordinal(n) {
 }
 
 // ── Debounce ─────────────────────────────────────────────────────
+/**
+ * Creates a debounced version of a function that delays invocation until after ms milliseconds.
+ * @param {Function} fn - Function to debounce
+ * @param {number} ms - Delay in milliseconds
+ * @returns {Function} Debounced function
+ */
 function debounce(fn, ms) {
   let t;
   return (...args) => {
@@ -452,6 +600,13 @@ function debounce(fn, ms) {
 }
 
 // ── Toast notifications ───────────────────────────────────────────
+/**
+ * Displays a toast notification in the bottom-right corner.
+ * @param {string} msg - Message text to display
+ * @param {string} [type='info'] - Toast type ('info', 'success', 'error', 'warn')
+ * @param {number} [duration=2500] - Display duration in milliseconds
+ * @returns {void}
+ */
 function toast(msg, type = 'info', duration = 2500) {
   let container = document.getElementById('toast-container');
   if (!container) {

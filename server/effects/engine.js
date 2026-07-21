@@ -1,5 +1,14 @@
+/**
+ * @fileoverview Effect engine for computing and applying character modifiers.
+ * Evaluates effect conditions against context and collects applicable modifiers.
+ */
 'use strict';
 
+/**
+ * Normalizes an effect object to ensure all fields have default values.
+ * @param {Object} [effect] - Raw effect definition
+ * @returns {Object|null} Normalized effect object or null if input is invalid
+ */
 function normalizeEffect(effect) {
   if (!effect || typeof effect !== 'object') return null;
   return {
@@ -15,6 +24,11 @@ function normalizeEffect(effect) {
   };
 }
 
+/**
+ * Normalizes a context object to ensure all fields have default values.
+ * @param {Object} [context] - Raw context with actor, action, roll, target, state
+ * @returns {Object} Normalized context object
+ */
 function normalizeContext(context) {
   return {
     actor: context?.actor || {},
@@ -25,15 +39,33 @@ function normalizeContext(context) {
   };
 }
 
+/**
+ * Checks if a container object has a specific tag (case-insensitive).
+ * @param {Object} container - Object with optional tags array
+ * @param {string} tag - Tag to search for
+ * @returns {boolean} True if tag is present
+ */
 function hasTag(container, tag) {
   const tags = Array.isArray(container?.tags) ? container.tags : [];
   return tags.map(t => String(t).toLowerCase()).includes(String(tag).toLowerCase());
 }
 
+/**
+ * Normalizes a name string to lowercase trimmed form for comparison.
+ * @param {string} value - Name to normalize
+ * @returns {string} Lowercase trimmed name
+ */
 function normalizeName(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+/**
+ * Evaluates whether a single condition matches the given context.
+ * Supports action_name_is, spell_name_is, roll_type_is, target_has_condition, and more.
+ * @param {Object} [condition] - Condition object with type and params
+ * @param {Object} [context] - Context object with actor, action, roll, target, state
+ * @returns {boolean} True if condition matches or is invalid/empty
+ */
 function conditionMatches(condition, context) {
   if (!condition || typeof condition !== 'object') return true;
 
@@ -74,6 +106,12 @@ function conditionMatches(condition, context) {
   }
 }
 
+/**
+ * Determines if an effect applies given a context by checking all its conditions.
+ * @param {Object} effect - Effect definition with conditions array
+ * @param {Object} [context] - Context to evaluate conditions against
+ * @returns {boolean} True if all conditions match
+ */
 function effectApplies(effect, context) {
   const normalized = normalizeEffect(effect);
   if (!normalized) return false;
@@ -81,10 +119,22 @@ function effectApplies(effect, context) {
   return normalized.conditions.every(condition => conditionMatches(condition, context));
 }
 
+/**
+ * Sorts effects array by priority in descending order.
+ * @param {Object[]} effects - Array of effect objects
+ * @returns {Object[]} New array sorted by priority (highest first)
+ */
 function sortByPriority(effects) {
   return [...effects].sort((a, b) => (b.priority || 0) - (a.priority || 0));
 }
 
+/**
+ * Collects all applicable modifiers from a list of effects given a context.
+ * Filters effects by conditions, sorts by priority, and handles exclusive tags.
+ * @param {Object[]} effects - Array of effect definitions
+ * @param {Object} [context] - Context to evaluate conditions against
+ * @returns {{applicable: Object[], modifiers: Object[]}} Applicable effects and their modifiers
+ */
 function collectModifiers(effects, context) {
   const applicable = effects.filter(e => effectApplies(e, context));
   const sorted = sortByPriority(applicable);
