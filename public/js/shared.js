@@ -519,8 +519,8 @@ function calcStats(char) {
   const mods = {};
   for (const ab of Object.keys(scores)) mods[ab] = abilityMod(scores[ab]);
 
-  // AC: default 10 + DEX (unarmored), override if set
-  const ac = overrides.ac ?? (10 + mods.dex);
+  // AC: manual override, else legacy armor snapshot, else 10 + DEX (unarmored)
+  const ac = overrides.ac_override ?? overrides.ac ?? (10 + mods.dex);
 
   // Initiative
   const initiative = overrides.initiative ?? mods.dex;
