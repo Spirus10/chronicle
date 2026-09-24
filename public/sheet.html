@@ -1875,7 +1875,8 @@ function rollDamage(label, expr, isHealing = false, isAttack = false) {
     toast('No damage dice to roll.', 'warn');
     return;
   }
-  const displayExpr = buildDamageExpression(label, baseExpr, { isHealing: opts.isHealing });
+  // Show exactly what was rolled so the toast can't disagree with the total.
+  const displayExpr = parts.map(p => p.expr).join(' + ');
   addLog(`${label}: ${detail.join(' · ')} => ${total}`);
   toast(`${label}: ${displayExpr} = ${total}`, 'info');
   if (opts.applyHealing) applyHeal(total);
@@ -2311,13 +2312,21 @@ async function resolveActionDamage(actionName, actionTags = [], filter = null) {
   }
 }
 
+// opts.hasBase: the row already shows the spell's own dice/healing, so skip
+// the spell's base-formula modifiers (spell_damage / spell_healing) and only
+// add true extras like Agonizing Blast — otherwise the base dice double up.
 function buildDamageExpressionFromModifiers(modifiers, stats, opts = {}) {
   if (!Array.isArray(modifiers)) return '';
-  const parts = [];
+  const target = opts.isHealing ? 'healing' : 'damage';
+  const baseTags = ['spell_damage', 'spell_healing'];
+  const dice = [];
+  const flats = [];
   for (const mod of modifiers) {
-    if (mod.kind === 'add_dice' && mod.target === (opts.isHealing ? 'healing' : 'damage')) {
-      const dice = scaledModDice(mod);
-      if (dice) parts.push(String(dice));
+    if (mod.target && mod.target !== target) continue;
+    if (opts.hasBase && (mod.tags || []).some(t => baseTags.includes(t))) continue;
+    if (mod.kind === 'add_dice') {
+      const d = scaledModDice(mod);
+      if (d) dice.push(String(d));
     }
     if (mod.kind === 'add_ability_mod') {
       const ability = mod.value?.ability;
@@ -2325,14 +2334,14 @@ function buildDamageExpressionFromModifiers(modifiers, stats, opts = {}) {
       let value = 0;
       if (ability === 'spellcasting') value = stats.spellMod || 0;
       else if (char?.ability_scores?.[ability] !== undefined) value = abilityMod(char.ability_scores[ability]);
-      if (value) parts.push(modStr(value));
+      if (value) flats.push(modStr(value));
     }
     if (mod.kind === 'add_flat') {
       const v = mod.value?.amount ?? mod.value;
-      if (typeof v === 'number' && v !== 0) parts.push(modStr(v));
+      if (typeof v === 'number' && v !== 0) flats.push(modStr(v));
     }
   }
-  return buildDamageExpressionFromParts(parts);
+  return buildDamageExpressionFromParts([...dice, ...flats]);
 }
 
 async function resolveDamageForRows(rootEl, selector, tags = [], filter = null) {
@@ -2353,8 +2362,8 @@ async function resolveDamageForRows(rootEl, selector, tags = [], filter = null) 
   resolved.forEach((mods, idx) => {
     if (!mods) return;
     const j = jobs[idx];
-    const modExpr = buildDamageExpressionFromModifiers(mods, stats, { isHealing: j.isHealing });
     const baseExpr = j.row.getAttribute('data-action-base-damage') || '';
+    const modExpr = buildDamageExpressionFromModifiers(mods, stats, { isHealing: j.isHealing, hasBase: !!baseExpr });
     const expr = baseExpr && modExpr
       ? buildDamageExpressionFromParts([baseExpr, modExpr])
       : (baseExpr || modExpr);
