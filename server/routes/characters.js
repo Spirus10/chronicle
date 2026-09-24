@@ -193,12 +193,20 @@ function loadCharacterEffectDefinitions(char) {
   const featIds = Array.isArray(char.feats) ? char.feats.map(id => parseInt(id, 10)) : [];
   effects.push(...fetchEffectDefinitions('feat', featIds));
 
-  const spellIds = new Set();
-  if (Array.isArray(char.spells_known)) {
-    char.spells_known.forEach(id => spellIds.add(parseInt(id, 10)));
+  // Selected optional features (Eldritch Invocations, Pact Boon, Fighting
+  // Styles, ...) — e.g. Agonizing Blast's damage modifier lives here.
+  const overrides = char.stat_overrides || {};
+  const optionalIds = new Set();
+  for (const group of [overrides.optional_feature_selections, overrides.feature_choice_selections]) {
+    for (const ids of Object.values(group || {})) {
+      if (Array.isArray(ids)) ids.forEach(id => optionalIds.add(parseInt(id, 10)));
+    }
   }
-  if (Array.isArray(char.spellbook)) {
-    char.spellbook.forEach(id => spellIds.add(parseInt(id, 10)));
+  effects.push(...fetchEffectDefinitions('optional_feature', [...optionalIds]));
+
+  const spellIds = new Set();
+  for (const list of [char.spells_known, char.spellbook, overrides.tome_cantrips, overrides.book_rituals]) {
+    if (Array.isArray(list)) list.forEach(id => spellIds.add(parseInt(id, 10)));
   }
   effects.push(...fetchEffectDefinitions('spell', [...spellIds]));
 

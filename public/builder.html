@@ -263,6 +263,12 @@ async function loadEditCharacter() {
   F.spells_known = c.spells_known || [];
   F.spellbook = c.spellbook || [];
   F.hp_max = c.stat_overrides?.hp_max || null;
+  F.armor_type = c.stat_overrides?.armor_type || 'unarmored';
+  // Characters saved before armor_type existed only have an AC snapshot in
+  // `ac`; keep it as a manual override so editing doesn't change their AC.
+  if (!c.stat_overrides?.armor_type && c.stat_overrides?.ac != null && F.stat_overrides.ac_override == null) {
+    F.stat_overrides.ac_override = c.stat_overrides.ac;
+  }
 
   if (F.class_id) {
     currentClass = await API.get(`/classes/${F.class_id}`);
@@ -952,8 +958,8 @@ function renderStep3() {
       <div class="field-row">
         <div class="field">
           <label>AC Override</label>
-          <input type="number" placeholder="Auto" value="${F.stat_overrides.ac ?? ''}"
-            oninput="setOverride('ac',this.value)">
+          <input type="number" placeholder="Auto" value="${F.stat_overrides.ac_override ?? ''}"
+            oninput="setOverride('ac_override',this.value)">
         </div>
         <div class="field">
           <label>Initiative Override</label>
@@ -1021,6 +1027,7 @@ function updateStep3Derived() {
   }
 
   const stats = calcStats(mockChar);
+  if (F.stat_overrides.ac_override == null) stats.ac = armorAC();
   const div = document.getElementById('derivedStats');
   if (!div) return;
 
@@ -1378,31 +1385,39 @@ function renderStep5() {
   renderReview();
 }
 
-function updateArmorAC() {
+// PHB armor table; mirrors computeArmorAC() on the character sheet.
+function armorAC() {
   const racialAsi = getRacialAsiBonuses();
-  const dexMod = abilityMod((F.ability_scores.dex || 10) + (racialAsi.dex || 0));
-  const armor = F.armor_type;
-  let ac;
-  if (armor === 'unarmored')  ac = 10 + dexMod;
-  else if (armor === 'mage_armor') ac = 13 + dexMod;
-  else if (armor === 'leather') ac = 11 + dexMod;
-  else if (armor === 'studded') ac = 12 + dexMod;
-  else if (armor === 'chain_shirt') ac = 13 + Math.min(2, dexMod);
-  else if (armor === 'scale') ac = 14 + Math.min(2, dexMod);
-  else if (armor === 'half_plate') ac = 15 + Math.min(2, dexMod);
-  else if (armor === 'ring') ac = 14;
-  else if (armor === 'chain') ac = 16;
-  else if (armor === 'splint') ac = 17;
-  else if (armor === 'plate') ac = 18;
-  else if (armor === 'shield') ac = (F.stat_overrides.ac || 10) + 2;
-  else ac = 10 + dexMod;
+  const dex = abilityMod((F.ability_scores.dex || 10) + (racialAsi.dex || 0));
+  switch (F.armor_type) {
+    case 'mage_armor':  return 13 + dex;
+    case 'leather':     return 11 + dex;
+    case 'studded':     return 12 + dex;
+    case 'chain_shirt': return 13 + Math.min(2, dex);
+    case 'scale':       return 14 + Math.min(2, dex);
+    case 'half_plate':  return 15 + Math.min(2, dex);
+    case 'ring':        return 14;
+    case 'chain':       return 16;
+    case 'splint':      return 17;
+    case 'plate':       return 18;
+    case 'shield':      return 12 + dex; // 10 + DEX + 2 (shield)
+    default:            return 10 + dex;
+  }
+}
 
-  if (armor !== 'shield') F.stat_overrides.ac = ac;
-  // Persist the armor type so the sheet can recompute AC live when DEX or
-  // class features change instead of relying on this frozen snapshot.
-  F.stat_overrides.armor_type = armor;
+function updateArmorAC() {
+  const ac = armorAC();
+  // Persist only the armor type; the sheet recomputes AC live from it. The
+  // manual override lives in ac_override, so armor never clobbers it.
+  F.stat_overrides.armor_type = F.armor_type;
+  delete F.stat_overrides.ac;
   const hint = document.getElementById('armorHint');
-  if (hint) hint.textContent = `Sets AC to ${armor !== 'shield' ? ac : 'base + 2'}`;
+  if (hint) {
+    const manual = F.stat_overrides.ac_override;
+    hint.textContent = manual != null
+      ? `Armor gives AC ${ac}, but your AC override of ${manual} takes precedence`
+      : `Sets AC to ${ac}`;
+  }
   renderReview();
 }
 
@@ -1414,7 +1429,7 @@ function renderReview() {
   const className = allClasses.find(c => c.id === F.class_id)?.name || '—';
   const subName = currentSubclasses.find(s => s.id === F.subclass_id)?.name || '';
   const hp = parseInt(document.getElementById('f_hp')?.value) || F.hp_max || '?';
-  const ac = F.stat_overrides.ac ?? '?';
+  const ac = F.stat_overrides.ac_override ?? armorAC();
   const langs = (F.language_proficiencies || []).map(v => v.replace(/\b\w/g, c => c.toUpperCase())).join(', ') || '—';
   const tools = (F.tool_proficiencies || []).map(v => v.replace(/\b\w/g, c => c.toUpperCase())).join(', ') || '—';
 

@@ -518,6 +518,7 @@ let effectDefinitions = [];
 let effectsBySource = { spell: {}, class_feature: {}, optional_feature: {}, feat: {}, race: {} };
 let effectsByName = {};
 let atWillSpells = new Set();
+let grantedSpells = {}; // spellId -> { source, freq } from selected invocations/options
 let noSlotSpells = new Set();
 let raceTraits = [];
 const tooltipMarkdownCache = new Map();
@@ -689,6 +690,7 @@ async function init() {
       }
     }
 
+    await loadGrantedSpells();
     await ensureActionTooltipSpellsLoaded();
 
     // Update header
@@ -783,8 +785,15 @@ function getStats() {
   const cls = (char.class_name || '').toLowerCase();
   const wearingArmor = !!armorType && !['unarmored', 'shield', 'mage_armor'].includes(armorType);
 
+  // A manual AC override is final: it wins over armor and class features.
+  const manualAc = Number(overrides.ac_override);
+  if (overrides.ac_override != null && overrides.ac_override !== '' && Number.isFinite(manualAc)) {
+    stats.ac = manualAc;
+    return stats;
+  }
+
   // Live AC from equipped armor type (tracks DEX changes), falling back to
-  // the stored override for characters created before armor_type was saved.
+  // the stored armor snapshot for characters created before armor_type was saved.
   const armorAc = armorType ? computeArmorAC(armorType, stats.mods.dex) : null;
   if (armorAc != null) stats.ac = armorAc;
 
@@ -1866,7 +1875,8 @@ function rollDamage(label, expr, isHealing = false, isAttack = false) {
     toast('No damage dice to roll.', 'warn');
     return;
   }
-  const displayExpr = buildDamageExpression(label, baseExpr, { isHealing: opts.isHealing });
+  // Show exactly what was rolled so the toast can't disagree with the total.
+  const displayExpr = parts.map(p => p.expr).join(' + ');
   addLog(`${label}: ${detail.join(' · ')} => ${total}`);
   toast(`${label}: ${displayExpr} = ${total}`, 'info');
   if (opts.applyHealing) applyHeal(total);
@@ -1994,6 +2004,53 @@ function indexSpellDetail(spell) {
   if (spell.name) {
     spellDetailsByName[String(spell.name).toLowerCase()] = spell;
   }
+}
+
+// Spells granted by selected optional features (5etools additionalSpells),
+// e.g. Armor of Shadows -> Mage Armor. innate "_" lists are at will without a
+// slot; "daily" lists are once per long rest (using a warlock slot for
+// invocations). Book of Ancient Secrets' ritual choices are handled separately.
+function optionalFeatureGrantedSpellNames() {
+  const out = [];
+  const add = (list, source, freq) => {
+    for (const s of (list || [])) {
+      if (typeof s === 'string') out.push({ name: s.split(/[|#]/)[0].trim(), source, freq });
+    }
+  };
+  for (const f of selectedOptionalFeaturesResolved()) {
+    for (const block of (f.data?.additionalSpells || [])) {
+      const innate = block?.innate?._;
+      if (Array.isArray(innate)) add(innate, f.name, 'will');
+      else if (innate) {
+        add(innate.will, f.name, 'will');
+        for (const list of Object.values(innate.daily || {})) add(list, f.name, 'daily');
+      }
+    }
+  }
+  return out;
+}
+
+async function loadGrantedSpells() {
+  grantedSpells = {};
+  for (const g of optionalFeatureGrantedSpellNames()) {
+    const key = g.name.toLowerCase();
+    let detail = spellDetailsByName[key];
+    if (detail?.id == null) {
+      const results = await API.get(`/spells?search=${encodeURIComponent(g.name)}&level=0-9`).catch(() => []);
+      const hit = (results || []).find(s => String(s.name || '').toLowerCase() === key);
+      if (!hit) continue;
+      detail = await API.get(`/spells/${hit.id}`).catch(() => hit);
+      indexSpellDetail(detail);
+    }
+    if (!allSpells.some(s => s.id === detail.id)) allSpells.push(detail);
+    grantedSpells[detail.id] = { source: g.source, freq: g.freq };
+  }
+}
+
+function grantedSpellNote(spellId) {
+  const g = grantedSpells[spellId];
+  if (!g) return '';
+  return g.freq === 'will' ? `${g.source} — at will, no slot` : `${g.source} — 1/long rest (uses a slot)`;
 }
 
 async function ensureActionTooltipSpellsLoaded() {
@@ -2255,13 +2312,21 @@ async function resolveActionDamage(actionName, actionTags = [], filter = null) {
   }
 }
 
+// opts.hasBase: the row already shows the spell's own dice/healing, so skip
+// the spell's base-formula modifiers (spell_damage / spell_healing) and only
+// add true extras like Agonizing Blast — otherwise the base dice double up.
 function buildDamageExpressionFromModifiers(modifiers, stats, opts = {}) {
   if (!Array.isArray(modifiers)) return '';
-  const parts = [];
+  const target = opts.isHealing ? 'healing' : 'damage';
+  const baseTags = ['spell_damage', 'spell_healing'];
+  const dice = [];
+  const flats = [];
   for (const mod of modifiers) {
-    if (mod.kind === 'add_dice' && mod.target === (opts.isHealing ? 'healing' : 'damage')) {
-      const dice = scaledModDice(mod);
-      if (dice) parts.push(String(dice));
+    if (mod.target && mod.target !== target) continue;
+    if (opts.hasBase && (mod.tags || []).some(t => baseTags.includes(t))) continue;
+    if (mod.kind === 'add_dice') {
+      const d = scaledModDice(mod);
+      if (d) dice.push(String(d));
     }
     if (mod.kind === 'add_ability_mod') {
       const ability = mod.value?.ability;
@@ -2269,14 +2334,14 @@ function buildDamageExpressionFromModifiers(modifiers, stats, opts = {}) {
       let value = 0;
       if (ability === 'spellcasting') value = stats.spellMod || 0;
       else if (char?.ability_scores?.[ability] !== undefined) value = abilityMod(char.ability_scores[ability]);
-      if (value) parts.push(modStr(value));
+      if (value) flats.push(modStr(value));
     }
     if (mod.kind === 'add_flat') {
       const v = mod.value?.amount ?? mod.value;
-      if (typeof v === 'number' && v !== 0) parts.push(modStr(v));
+      if (typeof v === 'number' && v !== 0) flats.push(modStr(v));
     }
   }
-  return buildDamageExpressionFromParts(parts);
+  return buildDamageExpressionFromParts([...dice, ...flats]);
 }
 
 async function resolveDamageForRows(rootEl, selector, tags = [], filter = null) {
@@ -2297,8 +2362,8 @@ async function resolveDamageForRows(rootEl, selector, tags = [], filter = null) 
   resolved.forEach((mods, idx) => {
     if (!mods) return;
     const j = jobs[idx];
-    const modExpr = buildDamageExpressionFromModifiers(mods, stats, { isHealing: j.isHealing });
     const baseExpr = j.row.getAttribute('data-action-base-damage') || '';
+    const modExpr = buildDamageExpressionFromModifiers(mods, stats, { isHealing: j.isHealing, hasBase: !!baseExpr });
     const expr = baseExpr && modExpr
       ? buildDamageExpressionFromParts([baseExpr, modExpr])
       : (baseExpr || modExpr);
@@ -3461,18 +3526,22 @@ function toggleInspiration() {
 // ── Stat overrides (click to edit) ──────────────────────────────
 function editStat(key) {
   const labels = { ac: 'AC', initiative: 'Initiative', spell_dc: 'Spell DC', spell_atk: 'Spell Attack bonus' };
+  const label = labels[key] || key;
+  // stat_overrides.ac holds the builder's armor snapshot; the manual AC
+  // override lives in its own key so armor can't clobber it.
+  if (key === 'ac') key = 'ac_override';
   const current = char.stat_overrides?.[key] ?? '';
-  const v = prompt(`Override ${labels[key] || key} (leave blank to auto-calculate):`, current);
+  const v = prompt(`Override ${label} (leave blank to auto-calculate):`, current);
   if (v === null) return;
   char.stat_overrides = char.stat_overrides || {};
   if (v === '') {
     delete char.stat_overrides[key];
-    toast(`${labels[key]} set to auto`, 'info');
+    toast(`${label} set to auto`, 'info');
   } else {
     const n = parseInt(v);
     if (isNaN(n)) return;
     char.stat_overrides[key] = n;
-    toast(`${labels[key]} overridden to ${n}`, 'success');
+    toast(`${label} overridden to ${n}`, 'success');
   }
   API.put(`/characters/${charId}`, { stat_overrides: char.stat_overrides }).catch(()=>{});
   renderVitals();
@@ -3832,7 +3901,13 @@ function useChannelDivinity() {
 function quickCast(spellId) {
   const spell = spellsById[spellId];
   if (!spell) return;
-  const noSlot = isSpellNoSlot(spell.name);
+  const isMageArmor = (spell.name || '').toLowerCase() === 'mage armor';
+  if (isMageArmor && state.class_resources?.mage_armor_active) {
+    toggleMageArmor(); // already up: casting again just ends it
+    renderSpells();
+    return;
+  }
+  const noSlot = isSpellNoSlot(spell.name) || grantedSpells[spellId]?.freq === 'will';
   const isAgathys = (spell.name || '').toLowerCase() === 'armor of agathys';
   if (isAgathys && state.hp_temp_source === 'agathys' && (state.hp_temp || 0) > 0) {
     clearTempHp();
@@ -3895,7 +3970,14 @@ function quickCast(spellId) {
     addLog(`Armor of Agathys: gained ${temp} temp HP (retaliates while temp HP remains).`);
   }
 
-  if (isTrackableSpellEffect(spell)) {
+  if (isMageArmor) {
+    const res = state.class_resources || {};
+    res.mage_armor_active = true;
+    state.class_resources = res;
+    setEffectActive('Mage Armor', true, '#50a0dc', 0, false, 'mage_armor');
+    renderAbilityStrip();
+    renderActionTopStats();
+  } else if (isTrackableSpellEffect(spell)) {
     const rounds = durationToRounds(spell.duration_text);
     const color = spell.concentration ? '#b48c3c' : '#6080cc';
     setEffectActive(spell.name, true, color, rounds, false, `spell:${spell.id}`);
@@ -3920,7 +4002,8 @@ function renderSpells() {
 
   const tomeIds = new Set(char.stat_overrides?.tome_cantrips || []);
   const bookIds = new Set(char.stat_overrides?.book_rituals || []);
-  const knownIds = new Set([...(char.spells_known||[]), ...(char.spellbook||[]), ...tomeIds, ...bookIds]);
+  const grantedIds = Object.keys(grantedSpells).map(Number);
+  const knownIds = new Set([...(char.spells_known||[]), ...(char.spellbook||[]), ...tomeIds, ...bookIds, ...grantedIds]);
   const spells = allSpells.filter(s => knownIds.has(s.id));
   const stats = getStats();
 
@@ -4032,6 +4115,7 @@ function renderSpells() {
       if (sp.ritual) noteParts.push('Ritual');
       if (tomeIds.has(sp.id)) noteParts.push('Tome');
       if (bookIds.has(sp.id)) noteParts.push('Book of Ancient Secrets — ritual only');
+      if (grantedSpells[sp.id]) noteParts.unshift(grantedSpellNote(sp.id));
       const notes = buildNotesFromEffect(spellEffect, noteParts);
       const isAtk = !!((effectMeta.spell_attack && effectMeta.spell_attack.length) || sp.attack_type || sp.attack_roll);
       const showSlotPicker = sp.level > 0 && scalingData;
@@ -4600,6 +4684,9 @@ async function setFeatureChoice(groupId, idx, value) {
   } catch (e) {
     toast('Failed to save feature choice.', 'error');
   }
+  await loadGrantedSpells();
+  renderSpells();
+  renderActions();
   renderFeatures();
 }
 
@@ -4613,12 +4700,28 @@ function optionalTypeLabel(type) {
   return map[type] || `Options (${type})`;
 }
 
+// PHB Warlock table, used if the class data lacks optionalfeatureProgression.
+const WARLOCK_INVOCATIONS_KNOWN = [0,2,2,2,3,3,4,4,5,5,5,6,6,6,7,7,7,8,8,8];
+
+// Count known at this level from the class's optionalfeatureProgression,
+// which is either a per-level array or a sparse { level: count } map.
+function classOptionalFeatureCount(type) {
+  const entry = (classDetail?.data?.optionalfeatureProgression || [])
+    .find(p => (p.featureType || []).includes(type));
+  if (!entry) return null;
+  const prog = entry.progression;
+  if (Array.isArray(prog)) return prog[char.level - 1] ?? 0;
+  let count = 0;
+  for (const [lvl, n] of Object.entries(prog || {})) {
+    if (+lvl <= char.level) count = Math.max(count, n);
+  }
+  return count;
+}
+
 function optionalKnownCount(type) {
-  const lvlProg = progression?.find(r => r.level === char.level);
-  if (!lvlProg) return null;
   const cls = (char.class_name || '').toLowerCase();
   if (type === 'EI' && cls === 'warlock') {
-    return lvlProg.class_specific?.extra ?? 0;
+    return classOptionalFeatureCount('EI') ?? WARLOCK_INVOCATIONS_KNOWN[char.level - 1] ?? 0;
   }
   if (type === 'PB' && cls === 'warlock' && char.level >= 3) {
     return 1;
@@ -4707,6 +4810,9 @@ async function setOptionalFeatureChoice(type, idx, value) {
   } catch (e) {
     toast('Failed to save class option.', 'error');
   }
+  await loadGrantedSpells();
+  renderSpells();
+  renderActions();
   const maxKnown = optionalKnownCount(type);
   if (maxKnown !== null && optionalFeatureSelections[type].length >= maxKnown) {
     optionalFeatureEditorOpen[type] = false;

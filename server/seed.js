@@ -359,16 +359,27 @@ function buildClassSpecific(cls, level) {
   const specific = {};
   const name = cls.name?.toLowerCase();
 
-  // Walk classTableGroups for class-specific columns
+  // Walk classTableGroups for class-specific columns, keyed by column label
+  // (e.g. "{@filter Invocations Known|...}" -> invocations_known). Spell
+  // columns are stored separately in the progression row.
+  const toKey = label => String(label ?? '')
+    .replace(/\{@\w+ ([^|}]*)[^}]*\}/g, '$1')
+    .trim().replace(/\W+/g, '_').replace(/^_|_$/g, '').toLowerCase();
   for (const grp of (cls.classTableGroups || [])) {
     const title = grp.title?.toLowerCase() ?? '';
     if (title.includes('cantrip') || title.includes('spell')) continue;
     const rows = grp.rowsArray ?? grp.rows ?? [];
     const levelRow = rows[level - 1];
     if (levelRow === undefined) continue;
-    // Normalize title to a key
-    const key = grp.title?.replace(/\s+/g, '_').toLowerCase() ?? 'extra';
-    specific[key] = Array.isArray(levelRow) ? levelRow[0] : levelRow;
+    if (!Array.isArray(levelRow)) {
+      specific[toKey(grp.title) || 'extra'] = levelRow;
+      continue;
+    }
+    levelRow.forEach((value, i) => {
+      const key = toKey(grp.colLabels?.[i]) || `col_${i}`;
+      if (/cantrip|spell|slot/.test(key)) return;
+      specific[key] = value;
+    });
   }
   return Object.keys(specific).length ? JSON.stringify(specific) : null;
 }
