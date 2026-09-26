@@ -93,11 +93,32 @@ async function checkAndSeed() {
     console.log(`Database already seeded (${counts} classes). Skipping seed.`);
   }
 
+  // Databases seeded before base weapons were imported have no PHB weapons
+  // (Dagger, Shortsword, ...), so inventory weapons had no damage or range.
+  const baseWeapons = db.prepare("SELECT COUNT(*) as n FROM weapons WHERE source = 'PHB'").get().n;
+  if (seeded && baseWeapons === 0) {
+    console.log('Base weapons missing. Seeding weapons...');
+    try {
+      const { seedWeapons } = require('./seed');
+      await seedWeapons();
+    } catch (err) {
+      console.error('Weapon seed failed:', err.message);
+    }
+  }
+
+  // Bump when seed-effects.js changes how existing effects are built so
+  // already-seeded databases pick up the fix.
+  const EFFECTS_VERSION = '2';
+  const effectsVersion = db.prepare("SELECT value FROM seed_meta WHERE key = 'effects_version'").get()?.value;
   const effectCount = db.prepare('SELECT COUNT(*) as n FROM effect_definitions').get().n;
-  if (effectCount === 0) {
-    console.log('Effect definitions missing. Seeding effect definitions...');
+  if (effectCount === 0 || effectsVersion !== EFFECTS_VERSION) {
+    console.log('Effect definitions missing or outdated. Seeding effect definitions...');
     try {
       await seedEffectDefinitions({ allSources: true });
+      db.prepare(`
+        INSERT INTO seed_meta (key, value) VALUES ('effects_version', ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')
+      `).run(EFFECTS_VERSION);
     } catch (err) {
       console.error('Effect definition seed failed:', err.message);
     }

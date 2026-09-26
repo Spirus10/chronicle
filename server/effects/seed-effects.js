@@ -596,7 +596,24 @@ function buildFeatureEffect({ row, entries, tags, sourceType }) {
   const curatedNoEffect = new Set([
     'armor of shadows',
   ]);
-  if (nameLower === 'sneak attack') tags.push('requires_toggle');
+  if (nameLower === 'sneak attack') {
+    tags.push('requires_toggle');
+    // The text parser picks up only the level-1 "1d6" and the word
+    // "incapacitated" (from "isn't incapacitated"). RAW: 1d6 per two rogue
+    // levels, rounded up, and no condition is applied to the target.
+    for (let i = modifiers.length - 1; i >= 0; i--) {
+      const kind = modifiers[i]?.kind;
+      if (kind === 'apply_condition' || (kind === 'add_dice' && modifiers[i].target === 'damage')) modifiers.splice(i, 1);
+    }
+    const scaling = {};
+    for (let lvl = 1; lvl <= 19; lvl += 2) scaling[lvl] = `${(lvl + 1) / 2}d6`;
+    modifiers.unshift({
+      kind: 'add_dice',
+      target: 'damage',
+      value: { dice: '1d6', scaling },
+      tags: ['feature_damage'],
+    });
+  }
   const onlyRulesText = modifiers.length === 1 && modifiers[0]?.kind === 'rules_text';
   if (onlyRulesText) tags.push('resolution:rules_text');
   const status = modifiers.length || curatedNoEffect.has(String(row.name || '').toLowerCase())
