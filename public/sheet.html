@@ -522,6 +522,7 @@ let atWillSpells = new Set();
 let grantedSpells = {}; // spellId -> { source, freq } from selected invocations/options
 let noSlotSpells = new Set();
 let raceTraits = [];
+let backgroundDetail = null;
 const tooltipMarkdownCache = new Map();
 let tooltipEl = null;
 let tooltipContentEl = null;
@@ -656,10 +657,8 @@ async function init() {
       subFeatures = await API.get(`/classes/${char.class_id}/subclasses/${char.subclass_id}/features?level=${char.level}`);
     }
 
-    if (char.race_id) {
-      const race = await API.get(`/races/${char.race_id}`).catch(() => null);
-      raceTraits = collectNamedEntries(race?.data?.entries || []);
-    }
+    if (char.race_id) raceTraits = await loadRaceTraits();
+    if (char.background_id) backgroundDetail = await API.get(`/backgrounds/${char.background_id}`).catch(() => null);
 
     optionalFeatureSelections = char.stat_overrides?.optional_feature_selections || {};
     featureChoiceSelections = char.stat_overrides?.feature_choice_selections || {};
@@ -1927,6 +1926,35 @@ function firstEntryText(entries) {
     return firstEntryText(entries.entries || entries.entry || entries.items || '');
   }
   return '';
+}
+
+// A subrace row (e.g. "Elf (Wood)") only carries the subrace's own traits;
+// the shared ones (Darkvision, Fey Ancestry, ...) live on the parent race.
+// Subrace entries marked data.overwrite replace the parent trait of that name
+// (Drow "Superior Darkvision" replaces "Darkvision").
+async function loadRaceTraits() {
+  const race = await API.get(`/races/${char.race_id}`).catch(() => null);
+  const own = race?.data?.entries || [];
+  const parent = race?.parent_race_id
+    ? await API.get(`/races/${race.parent_race_id}`).catch(() => null)
+    : null;
+  if (!parent) return collectNamedEntries(own);
+  const merged = [...(parent.data?.entries || [])];
+  for (const entry of own) {
+    const target = entry?.data?.overwrite;
+    const idx = target ? merged.findIndex(e => e?.name === target) : -1;
+    if (idx >= 0) merged[idx] = entry;
+    else merged.push(entry);
+  }
+  return collectNamedEntries(merged);
+}
+
+// Background features (e.g. "Feature: Criminal Contact"), skipping the
+// roleplay tables under "Suggested Characteristics".
+function backgroundFeatureEntries(bg) {
+  return (bg?.data?.entries || [])
+    .filter(e => e && typeof e === 'object' && e.name && Array.isArray(e.entries))
+    .filter(e => e.name !== 'Suggested Characteristics');
 }
 
 function collectNamedEntries(node, out = []) {
@@ -4398,6 +4426,23 @@ function renderFeatures() {
     html += `<div id="raceTraitsFeatures"><div style="font-size:12px;color:var(--dim)">Loading...</div></div>`;
   }
 
+  // Background features
+  const bgFeatures = backgroundFeatureEntries(backgroundDetail);
+  if (bgFeatures.length) {
+    html += `<div class="feature-section-label">Background — ${escapeHtml(backgroundDetail.name)}</div>`;
+    html += bgFeatures.map((f, i) => {
+      const bodyId = `bg_feature_${char.background_id}_${i}`;
+      return `
+        <div class="feature-card">
+          <div class="feature-header" onclick="toggleFeatureCard('${bodyId}')">
+            <div class="feature-name">${escapeHtml(f.name)}</div>
+          </div>
+          <div class="feature-body ${isCardOpen(bodyId) ? 'open' : ''}" id="${bodyId}">${renderEntries(f.entries)}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
   // Class features
   if (classFeatures.length) {
     html += `<div class="feature-section-label">Class Features — ${char.class_name}</div>`;
@@ -4483,8 +4528,8 @@ function renderFeatures() {
     if (raceTraits.length) {
       renderTraits(raceTraits);
     } else {
-      API.get(`/races/${char.race_id}`).then(r => {
-        raceTraits = collectNamedEntries(r?.data?.entries || []);
+      loadRaceTraits().then(traits => {
+        raceTraits = traits;
         renderTraits(raceTraits);
       }).catch(()=>{});
     }
