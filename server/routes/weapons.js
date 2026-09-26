@@ -21,6 +21,9 @@ router.get('/', (req, res) => {
       properties: JSON.parse(r.properties_json || '[]'),
       ranged: data.type === 'R',
       range: data.range || null,
+      versatile_dice: data.dmg2 || null,
+      weight: data.weight ?? null,
+      value_gp: data.value != null ? data.value / 100 : null,
     };
   }));
 });

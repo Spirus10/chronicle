@@ -808,6 +808,15 @@ router.post('/:id/effects/resolve', (req, res) => {
   });
 });
 
+// inventory.equipped: 0 = not equipped, 1 = equipped (main hand for weapons),
+// 2 = equipped in the off hand (two-weapon fighting), 3 = a stack of two or
+// more of the same weapon filling both hands.
+function equipSlot(value) {
+  if (value === 2 || value === '2' || value === 'off') return 2;
+  if (value === 3 || value === '3' || value === 'both') return 3;
+  return value ? 1 : 0;
+}
+
 // ── GET /api/characters/:id/inventory ─────────────────────────
 router.get('/:id/inventory', (req, res) => {
   if (!requireOwnedCharacter(req, res)) return;
@@ -829,7 +838,7 @@ router.post('/:id/inventory', (req, res) => {
   const result = db.prepare(`
     INSERT INTO inventory (character_id, name, quantity, weight, value_gp, equipped, item_type, weapon_damage, weapon_atk_bonus, notes, sort_order)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(req.params.id, name, quantity, weight ?? null, value_gp ?? null, equipped ? 1 : 0, item_type, weapon_damage, weapon_atk_bonus, notes, sortOrder);
+  `).run(req.params.id, name, quantity, weight ?? null, value_gp ?? null, equipSlot(equipped), item_type, weapon_damage, weapon_atk_bonus, notes, sortOrder);
 
   const row = db.prepare('SELECT * FROM inventory WHERE id = ?').get(result.lastInsertRowid);
   res.status(201).json(row);
@@ -849,7 +858,7 @@ router.put('/:id/inventory/:itemId', (req, res) => {
     if (req.body[field] === undefined) continue;
     updates.push(`${field} = @${field}`);
     if (field === 'equipped') {
-      params[field] = req.body[field] ? 1 : 0;
+      params[field] = equipSlot(req.body[field]);
     } else if (field === 'weapon_atk_bonus') {
       params[field] = req.body[field] === '' || req.body[field] === null ? null : req.body[field];
     } else {

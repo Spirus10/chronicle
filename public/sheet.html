@@ -436,7 +436,8 @@ body::before{content:'';position:fixed;inset:0;background:
     <h3 id="itemModalTitle">Add Item</h3>
     <div class="modal-field">
       <label>Name</label>
-      <input type="text" id="itemName" placeholder="e.g. Longsword +1">
+      <input type="text" id="itemName" placeholder="e.g. Longsword +1" list="weaponNameList" oninput="onItemNameInput(this.value)">
+      <datalist id="weaponNameList"></datalist>
     </div>
     <div class="modal-row">
       <div class="modal-field">
@@ -496,7 +497,7 @@ body::before{content:'';position:fixed;inset:0;background:
 // ── State ─────────────────────────────────────────────────────────
 const charId = new URLSearchParams(location.search).get('id');
 let char = null, state = null, progression = null, classFeatures = [], subFeatures = [];
-let classDetail = null, weaponRefByName = {};
+let classDetail = null, weaponRefByName = {}, weaponRefNames = [], featNamesLower = [];
 let allSpells = [], spellsById = {};
 let spellDetailsById = {};
 let spellDetailsByName = {};
@@ -521,6 +522,7 @@ let atWillSpells = new Set();
 let grantedSpells = {}; // spellId -> { source, freq } from selected invocations/options
 let noSlotSpells = new Set();
 let raceTraits = [];
+let backgroundDetail = null;
 const tooltipMarkdownCache = new Map();
 let tooltipEl = null;
 let tooltipContentEl = null;
@@ -636,17 +638,27 @@ async function init() {
     }
 
     // Weapon reference data (finesse/ranged properties, categories)
-    const weaponRef = await API.get('/weapons').catch(() => []);
+    const [weaponRef, feats] = await Promise.all([
+      API.get('/weapons').catch(() => []),
+      Promise.all((char.feats || []).map(id => API.get(`/feats/${id}`).catch(() => null))),
+    ]);
     weaponRefByName = {};
-    for (const w of (weaponRef || [])) weaponRefByName[String(w.name).toLowerCase()] = w;
+    // Several sources reuse a name; the PHB entry is the canonical stat line.
+    for (const w of (weaponRef || [])) {
+      const key = String(w.name).toLowerCase();
+      if (!weaponRefByName[key] || w.source === 'PHB') weaponRefByName[key] = w;
+    }
+    weaponRefNames = Object.values(weaponRefByName)
+      .filter(w => w.source === 'PHB')
+      .map(w => w.name)
+      .sort();
+    featNamesLower = feats.filter(Boolean).map(f => String(f.name || '').toLowerCase());
     if (char.subclass_id && char.class_id) {
       subFeatures = await API.get(`/classes/${char.class_id}/subclasses/${char.subclass_id}/features?level=${char.level}`);
     }
 
-    if (char.race_id) {
-      const race = await API.get(`/races/${char.race_id}`).catch(() => null);
-      raceTraits = collectNamedEntries(race?.data?.entries || []);
-    }
+    if (char.race_id) raceTraits = await loadRaceTraits();
+    if (char.background_id) backgroundDetail = await API.get(`/backgrounds/${char.background_id}`).catch(() => null);
 
     optionalFeatureSelections = char.stat_overrides?.optional_feature_selections || {};
     featureChoiceSelections = char.stat_overrides?.feature_choice_selections || {};
@@ -1807,7 +1819,16 @@ function getDamageModifiers(label, opts = {}) {
   if (!opts.isHealing && opts.isAttack && isHexActive()) {
     mods.push({ label: 'Hex', expr: '1d6' });
   }
+  // Sneak Attack is handled here rather than by the server effect so it only
+  // lands on finesse/ranged weapon hits and is spent after one use.
+  if (!opts.isHealing && opts.sneakEligible && isEffectActive('Sneak Attack')) {
+    mods.push({ label: 'Sneak Attack', expr: sneakAttackDice() });
+  }
   return mods;
+}
+
+function sneakAttackDice() {
+  return `${Math.ceil((Number(char?.level) || 1) / 2)}d6`;
 }
 
 function buildDamageExpression(label, baseExpr, opts = {}) {
@@ -1851,14 +1872,14 @@ function rollDiceExpression(expr) {
 
 function rollDamage(label, expr, isHealing = false, isAttack = false) {
   const opts = typeof isHealing === 'object'
-    ? { isHealing: !!isHealing.isHealing, skipModifiers: !!isHealing.skipModifiers, applyHealing: !!isHealing.applyHealing, isAttack: !!isHealing.isAttack, serverResolved: !!isHealing.serverResolved }
-    : { isHealing: !!isHealing, skipModifiers: false, applyHealing: false, isAttack: !!isAttack, serverResolved: false };
+    ? { isHealing: !!isHealing.isHealing, skipModifiers: !!isHealing.skipModifiers, applyHealing: !!isHealing.applyHealing, isAttack: !!isHealing.isAttack, serverResolved: !!isHealing.serverResolved, sneakEligible: !!isHealing.sneakEligible }
+    : { isHealing: !!isHealing, skipModifiers: false, applyHealing: false, isAttack: !!isAttack, serverResolved: false, sneakEligible: false };
   const baseExpr = String(expr || '').trim();
   if (!baseExpr) {
     toast('No damage dice to roll.', 'warn');
     return;
   }
-  const modifiers = opts.skipModifiers ? [] : getDamageModifiers(label, { isHealing: opts.isHealing, isAttack: opts.isAttack, serverResolved: opts.serverResolved });
+  const modifiers = opts.skipModifiers ? [] : getDamageModifiers(label, { isHealing: opts.isHealing, isAttack: opts.isAttack, serverResolved: opts.serverResolved, sneakEligible: opts.sneakEligible });
   const parts = [{ label: 'Base', expr: baseExpr }];
   for (const mod of modifiers) {
     if (mod?.expr) parts.push(mod);
@@ -1880,6 +1901,13 @@ function rollDamage(label, expr, isHealing = false, isAttack = false) {
   addLog(`${label}: ${detail.join(' · ')} => ${total}`);
   toast(`${label}: ${displayExpr} = ${total}`, 'info');
   if (opts.applyHealing) applyHeal(total);
+  // RAW: Sneak Attack applies once per turn — spend it on the hit that used it.
+  if (modifiers.some(m => m.label === 'Sneak Attack')) {
+    setEffectActive('Sneak Attack', false, '#cc9040', 0, false, 'sneak_attack');
+    addLog('Sneak Attack used.');
+    debouncedSaveState();
+    renderActions();
+  }
   renderActionEffects();
   return total;
 }
@@ -1898,6 +1926,35 @@ function firstEntryText(entries) {
     return firstEntryText(entries.entries || entries.entry || entries.items || '');
   }
   return '';
+}
+
+// A subrace row (e.g. "Elf (Wood)") only carries the subrace's own traits;
+// the shared ones (Darkvision, Fey Ancestry, ...) live on the parent race.
+// Subrace entries marked data.overwrite replace the parent trait of that name
+// (Drow "Superior Darkvision" replaces "Darkvision").
+async function loadRaceTraits() {
+  const race = await API.get(`/races/${char.race_id}`).catch(() => null);
+  const own = race?.data?.entries || [];
+  const parent = race?.parent_race_id
+    ? await API.get(`/races/${race.parent_race_id}`).catch(() => null)
+    : null;
+  if (!parent) return collectNamedEntries(own);
+  const merged = [...(parent.data?.entries || [])];
+  for (const entry of own) {
+    const target = entry?.data?.overwrite;
+    const idx = target ? merged.findIndex(e => e?.name === target) : -1;
+    if (idx >= 0) merged[idx] = entry;
+    else merged.push(entry);
+  }
+  return collectNamedEntries(merged);
+}
+
+// Background features (e.g. "Feature: Criminal Contact"), skipping the
+// roleplay tables under "Suggested Characteristics".
+function backgroundFeatureEntries(bg) {
+  return (bg?.data?.entries || [])
+    .filter(e => e && typeof e === 'object' && e.name && Array.isArray(e.entries))
+    .filter(e => e.name !== 'Suggested Characteristics');
 }
 
 function collectNamedEntries(node, out = []) {
@@ -1929,8 +1986,81 @@ function entriesToTooltipMarkdown(entries, title = '') {
   return title ? `### ${title}\n\n${fallback}` : fallback;
 }
 
+// Matches inventory names like "Shortsword", "two daggers", "a shortbow" or
+// "+1 Rapier" to the reference weapon they are an instance of.
 function weaponRefFor(item) {
-  return weaponRefByName[String(item?.name || '').trim().toLowerCase()] || null;
+  const raw = String(item?.name || '').trim().toLowerCase();
+  if (!raw) return null;
+  if (weaponRefByName[raw]) return weaponRefByName[raw];
+  const base = raw
+    .replace(/\s*\(.*?\)\s*/g, ' ')
+    .replace(/^(an?|the|one|two|three|four|five|ten|twenty|\d+)\s+/, '')
+    .replace(/^\+\d\s+/, '')
+    .replace(/,?\s*\+\d$/, '')
+    .trim();
+  if (weaponRefByName[base]) return weaponRefByName[base];
+  if (base.endsWith('s') && weaponRefByName[base.slice(0, -1)]) return weaponRefByName[base.slice(0, -1)];
+  return null;
+}
+
+function isWeaponItem(item) {
+  return item?.item_type === 'weapon' || !!weaponRefFor(item);
+}
+
+// Property codes from 5etools: F finesse, L light, T thrown, V versatile,
+// 2H two-handed, H heavy, R reach, A ammunition, LD loading.
+function weaponProps(item) {
+  const ref = weaponRefFor(item);
+  return new Set((ref?.properties || []).map(p => String(p).split('|')[0].trim().toUpperCase()));
+}
+
+// inventory.equipped: 0 = not equipped, 1 = equipped / main hand, 2 = off
+// hand, 3 = both hands from one stack (e.g. "two daggers").
+function weaponSlot(item) {
+  const v = Number(item?.equipped);
+  return v === 2 || v === 3 ? v : (item?.equipped ? 1 : 0);
+}
+const inMainHand = item => [1, 3].includes(weaponSlot(item));
+const inOffHand = item => [2, 3].includes(weaponSlot(item));
+
+const COUNT_WORDS = { two: 2, three: 3, four: 4, five: 5, ten: 10, twenty: 20 };
+function weaponCount(item) {
+  const lead = String(item?.name || '').trim().toLowerCase().match(/^(\d+|two|three|four|five|ten|twenty)\s/);
+  const fromName = lead ? (COUNT_WORDS[lead[1]] || parseInt(lead[1], 10) || 1) : 1;
+  return Math.max(Number(item?.quantity) || 1, fromName);
+}
+
+function hasFeatName(name) {
+  return featNamesLower.includes(String(name || '').toLowerCase());
+}
+
+// RAW: Sneak Attack needs a finesse or ranged weapon.
+function isSneakAttackWeapon(item) {
+  const ref = weaponRefFor(item);
+  return !!ref && (ref.ranged || weaponProps(item).has('F'));
+}
+
+const DAMAGE_TYPE_NAMES = { P: 'piercing', S: 'slashing', B: 'bludgeoning', N: 'necrotic', R: 'radiant', F: 'fire', C: 'cold', L: 'lightning', T: 'thunder', A: 'acid', I: 'poison', Y: 'psychic', O: 'force' };
+const WEAPON_PROP_NAMES = { F: 'Finesse', L: 'Light', T: 'Thrown', V: 'Versatile', '2H': 'Two-Handed', H: 'Heavy', R: 'Reach', A: 'Ammunition', LD: 'Loading', S: 'Special' };
+
+function weaponRangeText(item) {
+  const ref = weaponRefFor(item);
+  if (!ref) return 'Melee';
+  if (ref.ranged) return `${ref.range || '—'} ft`;
+  const reach = weaponProps(item).has('R') ? '10 ft' : '5 ft';
+  return ref.range ? `${reach} / ${ref.range} ft` : reach;
+}
+
+// RAW two-weapon fighting: both weapons must be light, unless the Dual
+// Wielder feat lifts that requirement.
+function twoWeaponFightingIssue(mainItem, offItem) {
+  if (!mainItem) return 'Needs a main-hand weapon';
+  if (weaponProps(mainItem).has('2H') || weaponProps(offItem).has('2H')) return 'Two-handed weapons need both hands';
+  if (hasFeatName('Dual Wielder')) return '';
+  const lightMain = weaponProps(mainItem).has('L');
+  const lightOff = weaponProps(offItem).has('L');
+  if (lightMain && lightOff) return '';
+  return 'Both weapons must be Light';
 }
 
 // RAW: ranged weapons use DEX, finesse weapons use the higher of STR/DEX,
@@ -2324,6 +2454,8 @@ function buildDamageExpressionFromModifiers(modifiers, stats, opts = {}) {
   for (const mod of modifiers) {
     if (mod.target && mod.target !== target) continue;
     if (opts.hasBase && (mod.tags || []).some(t => baseTags.includes(t))) continue;
+    // Added client-side by getDamageModifiers, gated on weapon eligibility.
+    if (String(mod.source_effect || '').toLowerCase() === 'sneak attack') continue;
     if (mod.kind === 'add_dice') {
       const d = scaledModDice(mod);
       if (d) dice.push(String(d));
@@ -2354,8 +2486,9 @@ async function resolveDamageForRows(rootEl, selector, tags = [], filter = null) 
     const btn = row.querySelector('.action-dmg-btn');
     const isHealing = row.getAttribute('data-action-healing') === 'true';
     const isAttack = row.getAttribute('data-action-attack') === 'true';
-    if (!actionName || !btn) return null;
-    return { row, actionName, btn, isHealing, isAttack };
+    const sneakEligible = row.getAttribute('data-action-sneak') === 'true';
+    if (!actionName || !btn || btn.disabled) return null;
+    return { row, actionName, btn, isHealing, isAttack, sneakEligible };
   }).filter(Boolean);
 
   const resolved = await Promise.all(jobs.map(j => resolveActionDamage(j.actionName, j.isAttack ? [...tags, 'attack'] : tags, filter)));
@@ -2368,8 +2501,10 @@ async function resolveDamageForRows(rootEl, selector, tags = [], filter = null) 
       ? buildDamageExpressionFromParts([baseExpr, modExpr])
       : (baseExpr || modExpr);
     if (!expr) return;
-    j.btn.textContent = buildDamageExpression(j.actionName, expr, { isHealing: j.isHealing, isAttack: j.isAttack, serverResolved: true });
-    j.btn.setAttribute('onclick', `rollDamage('${escapeAttr(j.actionName)}','${escapeAttr(expr)}',${JSON.stringify({ isHealing: j.isHealing, isAttack: j.isAttack, serverResolved: true, skipModifiers: false })})`);
+    j.btn.textContent = buildDamageExpression(j.actionName, expr, { isHealing: j.isHealing, isAttack: j.isAttack, serverResolved: true, sneakEligible: j.sneakEligible });
+    // setAttribute takes raw JS (no HTML decoding); JSON.stringify quotes
+    // names safely even when they contain apostrophes ("Hunter's Knife").
+    j.btn.setAttribute('onclick', `rollDamage(${JSON.stringify(j.actionName)},${JSON.stringify(expr)},${JSON.stringify({ isHealing: j.isHealing, isAttack: j.isAttack, serverResolved: true, skipModifiers: false, sneakEligible: j.sneakEligible })})`);
   });
 }
 
@@ -2925,9 +3060,11 @@ function renderActions() {
     const sneak = Math.ceil(char.level / 2);
     const saEffect = getEffectByName('Sneak Attack');
     const saTooltip = effectTooltipText(saEffect, 'Sneak Attack') || getActionTooltip('sneak_attack', 'Sneak Attack');
-    const saNotes = buildNotesFromEffect(saEffect);
     const saActive = isEffectActive('Sneak Attack');
-    buttons.push(spellBtn(`🗡 Sneak Attack (${sneak}d6)`, '#cc9040', saActive, false, 'toggleSneakAttack()', saTooltip, 'attack', {
+    const saNotes = saActive
+      ? 'Armed — added to your next finesse/ranged weapon damage roll'
+      : 'Once per turn: arm when you have advantage or an ally is adjacent to the target';
+    buttons.push(spellBtn(`🗡 Sneak Attack (${sneak}d6)${saActive ? ' ✓' : ''}`, '#cc9040', saActive, false, 'toggleSneakAttack()', saTooltip, 'attack', {
       range: 'Melee/Ranged',
       damage: `${sneak}d6`,
       notes: saNotes,
@@ -3011,37 +3148,66 @@ function renderActions() {
   }
 
   // ── Weapons (equipped) ─────────────────────────────────────────
-  const weaponItems = (inventory || []).filter(i => i.item_type === 'weapon' && i.equipped);
-  if (weaponItems.length) {
-    for (const item of weaponItems) {
-      const abilityModVal = weaponAttackAbilityMod(item, stats);
-      const proficient = isProficientWithWeapon(item);
-      const atkBonus = item.weapon_atk_bonus == null
-        ? ((proficient ? stats.pb : 0) + abilityModVal)
-        : parseInt(item.weapon_atk_bonus, 10);
-      const hitdc = Number.isFinite(atkBonus) ? modStr(atkBonus) : '—';
-      const baseDmg = item.weapon_damage || weaponRefFor(item)?.damage_dice || '';
-      // RAW: the ability modifier used for the attack roll is added to weapon
-      // damage. Skip when the stored damage string already ends in a flat
-      // modifier (assume the user baked it in).
-      const hasBakedMod = /[+\-]\s*\d+\s*$/.test(baseDmg);
-      const dmg = baseDmg && abilityModVal && !hasBakedMod
-        ? `${baseDmg}${modStr(abilityModVal)}`
-        : baseDmg;
-      const notes = item.notes || '';
-      const tooltip = buildWeaponTooltipMarkdown(item, hitdc, dmg || '—');
-      buttons.push(spellBtn(`⚔ ${item.name}`, '#cc6040', false, false, `addLog('Attack: ${escapeAttr(item.name)}')`, tooltip, 'attack', {
-        range: '—',
-        hitdc,
-        damage: dmg,
-        baseDamage: dmg,
-        notes,
-        actionKind: 'weapon',
-        actionName: item.name,
-        isAttack: true,
-      }));
+  // Main-hand weapons are Attack-action rows; an off-hand weapon adds the
+  // two-weapon fighting bonus-action attack.
+  const equippedWeapons = (inventory || []).filter(i => isWeaponItem(i) && weaponSlot(i));
+  const mainWeapons = equippedWeapons.filter(inMainHand);
+  const offWeapon = equippedWeapons.find(inOffHand) || null;
+  const isRogue = cls === 'rogue';
+  const pushWeaponRow = (item, { offHand = false, twoHanded = false } = {}) => {
+    const ref = weaponRefFor(item);
+    const props = weaponProps(item);
+    const abilityModVal = weaponAttackAbilityMod(item, stats);
+    const proficient = isProficientWithWeapon(item);
+    const atkBonus = item.weapon_atk_bonus == null
+      ? ((proficient ? stats.pb : 0) + abilityModVal)
+      : parseInt(item.weapon_atk_bonus, 10);
+    const hitdc = Number.isFinite(atkBonus) ? modStr(atkBonus) : '—';
+    const baseDmg = (twoHanded && ref?.versatile_dice) || item.weapon_damage || ref?.damage_dice || '';
+    // RAW: the attack's ability modifier is added to damage — except on the
+    // off-hand attack, where only a negative modifier applies unless the
+    // character has the Two-Weapon Fighting style. Skip when the stored
+    // damage string already ends in a flat modifier (user baked it in).
+    const hasBakedMod = /[+\-]\s*\d+\s*$/.test(baseDmg);
+    const twfStyle = hasSelectedFeatureName('Two-Weapon Fighting');
+    const dmgMod = offHand && !twfStyle ? Math.min(0, abilityModVal) : abilityModVal;
+    const dmg = baseDmg && dmgMod && !hasBakedMod ? `${baseDmg}${modStr(dmgMod)}` : baseDmg;
+    const dmgType = DAMAGE_TYPE_NAMES[ref?.damage_type] || '';
+    const sneakEligible = isRogue && isSneakAttackWeapon(item);
+    const twfIssue = offHand ? twoWeaponFightingIssue(mainWeapons[0], item) : '';
+    const noteParts = [];
+    if (dmgType) noteParts.push(dmgType);
+    const propNames = [...props].map(p => WEAPON_PROP_NAMES[p]).filter(Boolean);
+    if (propNames.length) noteParts.push(propNames.join(', '));
+    if (ref?.versatile_dice && !twoHanded) noteParts.push(`${ref.versatile_dice} two-handed`);
+    if (!proficient) noteParts.push('Not proficient');
+    if (offHand) noteParts.push(twfIssue || (twfStyle ? 'TWF style: adds mod' : 'No ability mod to damage'));
+    if (isRogue && isEffectActive('Sneak Attack')) {
+      noteParts.push(sneakEligible ? `+${sneakAttackDice()} Sneak Attack` : 'No Sneak Attack (needs finesse/ranged)');
+    }
+    if (item.notes && item.notes !== 'Starting equipment') noteParts.push(item.notes);
+    const label = offHand ? `🗡 ${item.name} (off-hand)` : twoHanded ? `⚔ ${item.name} (two-handed)` : `⚔ ${item.name}`;
+    const tooltip = buildWeaponTooltipMarkdown(item, hitdc, dmg || '—');
+    buttons.push(spellBtn(label, '#cc6040', false, !!twfIssue, '', tooltip, offHand ? 'bonus' : 'attack', {
+      range: weaponRangeText(item),
+      hitdc,
+      damage: dmg,
+      baseDamage: dmg,
+      notes: noteParts.join(' · '),
+      actionKind: 'weapon',
+      actionName: item.name,
+      isAttack: true,
+      sneakEligible,
+    }));
+  };
+  for (const item of mainWeapons) {
+    pushWeaponRow(item);
+    // Versatile weapons can be swung two-handed when the other hand is free.
+    if (weaponRefFor(item)?.versatile_dice && !offWeapon && mainWeapons.length === 1) {
+      pushWeaponRow(item, { twoHanded: true });
     }
   }
+  if (offWeapon) pushWeaponRow(offWeapon, { offHand: true });
 
   // ── Generic spellcaster quick-actions ────────────────────────
   if (hasSelectedFeatureName('Protection')) {
@@ -3152,7 +3318,7 @@ function spellBtn(label, color, active, dim, onclick, tooltip = '', type = 'othe
       ? (extractDamageDice(tooltip) || extractDamageDice(label))
       : (extractDamageExpression(tooltip) || extractDamageExpression(label)));
   const rollExpr = dmgFromMeta || dmgFromTip;
-  const displayExpr = rollExpr ? buildDamageExpression(label, rollExpr, { isHealing: meta.isHealing, isAttack: meta.isAttack }) : '';
+  const displayExpr = rollExpr ? buildDamageExpression(label, rollExpr, { isHealing: meta.isHealing, isAttack: meta.isAttack, sneakEligible: meta.sneakEligible }) : '';
   const fallbackLabel = meta.useAction ? 'Use' : (meta.isSpell ? 'Cast' : 'Use');
   const damage = escapeHtml(displayExpr || fallbackLabel);
   const useDisabled = dim ? 'disabled' : '';
@@ -3160,10 +3326,10 @@ function spellBtn(label, color, active, dim, onclick, tooltip = '', type = 'othe
   const btnClass = 'action-dmg-btn';
   const useRollAction = rollExpr && !meta.forceOnclick;
   const btnAction = useRollAction
-    ? `rollDamage('${escapeAttr(label)}','${escapeAttr(rollExpr)}',${meta.isHealing ? 'true' : 'false'},${meta.isAttack ? 'true' : 'false'})`
+    ? escapeAttr(`rollDamage(${JSON.stringify(label)},${JSON.stringify(rollExpr)},${JSON.stringify({ isHealing: !!meta.isHealing, isAttack: !!meta.isAttack, sneakEligible: !!meta.sneakEligible })})`)
     : onclick;
   return `
-    <div class="action-row" data-action-type="${type}" data-action-name="${escapeAttr(actionName)}" data-action-kind="${escapeAttr(meta.actionKind || '')}" data-action-healing="${meta.isHealing ? 'true' : 'false'}" data-action-attack="${meta.isAttack ? 'true' : 'false'}" data-action-base-damage="${escapeAttr(meta.baseDamage || '')}" style="border-color:${active ? color : 'var(--border)'};${rowStyle}">
+    <div class="action-row" data-action-type="${type}" data-action-name="${escapeAttr(actionName)}" data-action-kind="${escapeAttr(meta.actionKind || '')}" data-action-healing="${meta.isHealing ? 'true' : 'false'}" data-action-attack="${meta.isAttack ? 'true' : 'false'}" data-action-sneak="${meta.sneakEligible ? 'true' : 'false'}" data-action-base-damage="${escapeAttr(meta.baseDamage || '')}" style="border-color:${active ? color : 'var(--border)'};${rowStyle}">
       <div class="action-name" data-tip="${tip}" style="color:${active ? color : 'var(--text)'}">${name}</div>
       <div class="action-range">${range}</div>
       <div class="action-hit">${hitdc}</div>
@@ -4260,6 +4426,23 @@ function renderFeatures() {
     html += `<div id="raceTraitsFeatures"><div style="font-size:12px;color:var(--dim)">Loading...</div></div>`;
   }
 
+  // Background features
+  const bgFeatures = backgroundFeatureEntries(backgroundDetail);
+  if (bgFeatures.length) {
+    html += `<div class="feature-section-label">Background — ${escapeHtml(backgroundDetail.name)}</div>`;
+    html += bgFeatures.map((f, i) => {
+      const bodyId = `bg_feature_${char.background_id}_${i}`;
+      return `
+        <div class="feature-card">
+          <div class="feature-header" onclick="toggleFeatureCard('${bodyId}')">
+            <div class="feature-name">${escapeHtml(f.name)}</div>
+          </div>
+          <div class="feature-body ${isCardOpen(bodyId) ? 'open' : ''}" id="${bodyId}">${renderEntries(f.entries)}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
   // Class features
   if (classFeatures.length) {
     html += `<div class="feature-section-label">Class Features — ${char.class_name}</div>`;
@@ -4345,8 +4528,8 @@ function renderFeatures() {
     if (raceTraits.length) {
       renderTraits(raceTraits);
     } else {
-      API.get(`/races/${char.race_id}`).then(r => {
-        raceTraits = collectNamedEntries(r?.data?.entries || []);
+      loadRaceTraits().then(traits => {
+        raceTraits = traits;
         renderTraits(raceTraits);
       }).catch(()=>{});
     }
@@ -4917,13 +5100,13 @@ function renderInventory() {
                 <td>
                   <div class="inv-name">${item.name}</div>
                   <span class="inv-type" style="background:${typeColors[item.item_type]||'#5a5040'}18;color:${typeColors[item.item_type]||'#5a5040'};border:1px solid ${typeColors[item.item_type]||'#5a5040'}33">${item.item_type}</span>
-                  ${item.item_type === 'weapon' ? `<div style="font-size:10px;color:var(--dim);margin-top:2px">Atk ${item.weapon_atk_bonus != null ? modStr(parseInt(item.weapon_atk_bonus, 10) || 0) : '—'} · Dmg ${item.weapon_damage || '—'}</div>` : ''}
+                  ${isWeaponItem(item) ? `<div style="font-size:10px;color:var(--dim);margin-top:2px">${escapeHtml(inventoryWeaponSummary(item))}</div>` : ''}
                   ${item.notes ? `<div style="font-size:10px;color:var(--dim);margin-top:2px">${item.notes}</div>` : ''}
                 </td>
                 <td style="text-align:center"><input type="number" min="1" value="${item.quantity}" style="width:44px;background:var(--paper);border:1px solid var(--border);border-radius:3px;color:var(--text);padding:2px 4px;font-size:12px;font-family:inherit;outline:none;text-align:center" oninput="updateItem(${item.id},'quantity',this.value)"></td>
                 <td style="font-size:11px;color:var(--dim)">${item.weight ? item.weight+'lb' : '—'}</td>
                 <td style="font-size:11px;color:var(--dim)">${item.value_gp != null ? item.value_gp+'gp' : '—'}</td>
-                <td><div class="equipped-dot ${item.equipped ? 'on' : 'off'}" onclick="toggleEquipped(${item.id},${item.equipped})" title="${item.equipped ? 'Equipped — click to unequip' : 'Not equipped — click to equip'}"></div></td>
+                <td>${isWeaponItem(item) ? renderWeaponSlotButtons(item) : `<div class="equipped-dot ${item.equipped ? 'on' : 'off'}" onclick="toggleEquipped(${item.id},${item.equipped})" title="${item.equipped ? 'Equipped — click to unequip' : 'Not equipped — click to equip'}"></div>`}</td>
                 <td><button class="btn btn-dim btn-sm" onclick="deleteItem(${item.id})" style="padding:2px 6px">✕</button></td>
               </tr>
             `).join('')}
@@ -4953,9 +5136,56 @@ async function updateItem(id, field, val) {
 async function toggleEquipped(id, current) {
   const item = inventory.find(i => i.id === id);
   if (!item) return;
-  item.equipped = !current;
+  item.equipped = current ? 0 : 1;
   try { await API.put(`/characters/${charId}/inventory/${id}`, { equipped: item.equipped }); } catch(e) {}
   renderInventory();
+  renderActions();
+}
+
+function inventoryWeaponSummary(item) {
+  const ref = weaponRefFor(item);
+  const parts = [];
+  if (item.weapon_atk_bonus != null) parts.push(`Atk ${modStr(parseInt(item.weapon_atk_bonus, 10) || 0)}`);
+  const dmg = item.weapon_damage || ref?.damage_dice;
+  if (dmg) parts.push(`${dmg}${ref?.damage_type ? ' ' + (DAMAGE_TYPE_NAMES[ref.damage_type] || '') : ''}`.trim());
+  const props = [...weaponProps(item)].map(p => WEAPON_PROP_NAMES[p]).filter(Boolean);
+  if (props.length) parts.push(props.join(', '));
+  if (!ref && !item.weapon_damage) parts.push('Unknown weapon: set damage via edit');
+  return parts.join(' · ');
+}
+
+function renderWeaponSlotButtons(item) {
+  const slot = weaponSlot(item);
+  const btn = (value, text, title) => `<button class="btn btn-sm ${slot === value ? 'btn-gold' : 'btn-dim'}" style="padding:2px 6px;font-size:10px" title="${title}" onclick="setWeaponSlot(${item.id},${slot === value ? 0 : value})">${text}</button>`;
+  return `<div style="display:flex;gap:3px;justify-content:center">
+    ${btn(1, 'Main', slot === 1 ? 'In main hand — click to unequip' : 'Equip in main hand (Attack action)')}
+    ${btn(2, 'Off', slot === 2 ? 'In off hand — click to unequip' : 'Equip in off hand (two-weapon fighting bonus action)')}
+    ${weaponCount(item) >= 2 ? btn(3, 'Both', slot === 3 ? 'One in each hand — click to unequip' : 'Wield one in each hand (two-weapon fighting)') : ''}
+  </div>`;
+}
+
+// Only one weapon can sit in the off hand; equipping a new one there
+// moves the previous off-hand weapon back to main-hand-only or unequips it.
+async function setWeaponSlot(id, slot) {
+  const item = inventory.find(i => i.id === id);
+  if (!item) return;
+  const changes = [];
+  if (slot === 2 || slot === 3) {
+    for (const other of inventory) {
+      if (other.id === id || !inOffHand(other)) continue;
+      changes.push([other, weaponSlot(other) === 3 ? 1 : 0]);
+    }
+    if (weaponProps(item).has('2H')) toast(`${item.name} is two-handed and can't be used off-hand.`, 'warn');
+  }
+  changes.push([item, slot]);
+  for (const [it, value] of changes) it.equipped = value;
+  renderInventory();
+  renderActions();
+  try {
+    await Promise.all(changes.map(([it, value]) => API.put(`/characters/${charId}/inventory/${it.id}`, { equipped: value })));
+  } catch (e) {
+    toast('Failed to save equipped weapon.', 'error');
+  }
 }
 
 async function deleteItem(id) {
@@ -4964,12 +5194,15 @@ async function deleteItem(id) {
     await API.del(`/characters/${charId}/inventory/${id}`);
     inventory = inventory.filter(i => i.id !== id);
     renderInventory();
+    renderActions();
   } catch(e) { toast('Failed to delete item.', 'error'); }
 }
 
 function openItemModal(editId) {
   editingItemId = editId || null;
   document.getElementById('itemModalTitle').textContent = editId ? 'Edit Item' : 'Add Item';
+  document.getElementById('weaponNameList').innerHTML = weaponRefNames.map(n => `<option value="${escapeAttr(n)}"></option>`).join('');
+  document.getElementById('itemWeaponDamage').placeholder = 'e.g. 1d8';
   if (editId) {
     const item = inventory.find(i => i.id === editId);
     if (item) {
@@ -4996,6 +5229,21 @@ function openItemModal(editId) {
   }
   document.getElementById('itemModal').classList.remove('hidden');
   setTimeout(() => document.getElementById('itemName').focus(), 50);
+}
+
+// Picking a known weapon name fills in its type, weight, value and damage
+// (as a placeholder, so an explicit override still wins).
+function onItemNameInput(value) {
+  const ref = weaponRefFor({ name: value });
+  const dmgInput = document.getElementById('itemWeaponDamage');
+  dmgInput.placeholder = ref?.damage_dice ? `${ref.damage_dice} (from ${ref.name})` : 'e.g. 1d8';
+  if (!ref) return;
+  document.getElementById('itemType').value = 'weapon';
+  toggleWeaponFields('weapon');
+  const weight = document.getElementById('itemWeight');
+  const val = document.getElementById('itemValue');
+  if (!weight.value && ref.weight != null) weight.value = ref.weight;
+  if (!val.value && ref.value_gp != null) val.value = ref.value_gp;
 }
 
 function toggleWeaponFields(typeValue) {
@@ -5038,6 +5286,7 @@ async function saveItem() {
     }
     closeItemModal();
     renderInventory();
+    renderActions();
     toast(editingItemId ? 'Item updated.' : 'Item added.', 'success');
   } catch(e) { toast(`Failed: ${e.message}`, 'error'); }
 }

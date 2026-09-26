@@ -772,11 +772,16 @@ async function seedSpells() {
   }
 }
 
+// items.json holds named/magic weapons; the mundane PHB weapons (Dagger,
+// Shortsword, Shortbow, ...) live in items-base.json under `baseitem`.
 async function seedWeapons() {
   console.log('Seeding weapons...');
   try {
-    const data = await fetchJSON(`${BASE}/items.json`);
-    for (const item of (data.item || [])) {
+    const [base, data] = await Promise.all([
+      fetchJSON(`${BASE}/items-base.json`),
+      fetchJSON(`${BASE}/items.json`),
+    ]);
+    for (const item of [...(base.baseitem || []), ...(data.item || [])]) {
       if (item._copy) continue;
       const isWeapon = !!(item.weaponCategory || item.type === 'M' || item.type === 'R' || item.weapon);
       if (!isWeapon) continue;
@@ -942,4 +947,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { main };
+module.exports = { main, seedWeapons };
